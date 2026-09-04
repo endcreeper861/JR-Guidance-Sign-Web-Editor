@@ -275,7 +275,39 @@
       assertEqual(parseFloat(texts3[2].getAttribute('x')), mtR.labelX + mtR.label.width - enWEx, 'Exit 右对齐');
     });
 
-    test('标识牌灰框：每行 4 矩形、贴边界向内、先于元素渲染、关闭不渲染', function () {
+    test('BigNumber 多位数：按墨区间距逐字排列（含 1 不松散）', function () {
+      var el = SignState.createElement('big-number', { text: '14' });
+      var r = SignRender.renderElement(el, 256, measure);
+      var texts = r.node.querySelectorAll('text');
+      assertEqual(texts.length, 2, '多位数逐字渲染');
+      assertEqual(texts[0].textContent, '1');
+      assertEqual(texts[1].textContent, '4');
+      var s = 256 * 0.6;
+      var fontSize = s * 1.3;
+      var ctx = document.createElement('canvas').getContext('2d');
+      ctx.font = '400 ' + fontSize + 'px ' + SignCore.FONT_NUM;
+      function inkLeftOf(node) {
+        var tm = ctx.measureText(node.textContent);
+        return parseFloat(node.getAttribute('x')) - tm.width / 2 - tm.actualBoundingBoxLeft;
+      }
+      function inkW(ch) {
+        var tm = ctx.measureText(ch);
+        return tm.actualBoundingBoxRight + tm.actualBoundingBoxLeft;
+      }
+      // 相邻墨区间距 = 基准墨区间距 g = lsb₃ + rsb₃（与数字线路同规则）
+      var tm3 = ctx.measureText('3');
+      var g = -tm3.actualBoundingBoxLeft + (tm3.width - tm3.actualBoundingBoxRight);
+      var gap14 = inkLeftOf(texts[1]) - (inkLeftOf(texts[0]) + inkW('1'));
+      assert(Math.abs(gap14 - g) < 1.5, '1→4 墨区间距应为基准值 ' + gap14 + ' vs ' + g);
+      // 首位墨区贴齐盒左缘并保留首位字形自己的字距边距（盒边距不随位数变化）
+      var padL = 256 * 0.2;
+      var tm1 = ctx.measureText('1');
+      var lsb1 = -tm1.actualBoundingBoxLeft;
+      assert(Math.abs(inkLeftOf(texts[0]) - (padL + lsb1)) < 1.5, '首位墨区 = 盒左缘 + 首位字距边距');
+      assertEqual(r.width, SignRender.elementMetrics(el, 256, measure).width, '宽度 = metrics');
+    });
+
+    test('标识牌灰框：每行 4 矩形、贴边界向内、渲染于元素之上、关闭不渲染', function () {
       var svg = document.createElementNS(SignCore.SVG_NS, 'svg');
       var sign = SignState.createSign();
       sign.width = 1000;
@@ -338,6 +370,43 @@
       assertEqual(r.node.querySelectorAll('polygon,text').length, 0);
     });
 
+    test('Space 背景色：可渲染背景矩形，缺省透明', function () {
+      var el = SignState.createElement('space', {
+        widthRatio: 0.5, backgroundColor: '#336699',
+      });
+      var r = SignRender.renderElement(el, 200, measure);
+      var rects = r.node.querySelectorAll('rect');
+      assertEqual(rects.length, 2, '背景矩形 + hitbox');
+      assertEqual(rects[0].getAttribute('fill'), '#336699', '背景色');
+      assertEqual(parseFloat(rects[0].getAttribute('width')), 100, '背景覆盖元素全宽');
+      assertEqual(parseFloat(rects[0].getAttribute('height')), 200, '背景覆盖行高');
+      // 缺省（null）不渲染背景
+      var r2 = SignRender.renderElement(SignState.createElement('space', { widthRatio: 0.5 }), 200, measure);
+      assertEqual(r2.node.querySelectorAll('rect').length, 1, '缺省仅 hitbox');
+    });
+
+    test('相邻同背景色元素无缝：边界取整且相互覆盖', function () {
+      var svg = document.createElementNS(SignCore.SVG_NS, 'svg');
+      var sign = SignState.createSign();
+      sign.width = 1000;
+      sign.rowHeight = 100;
+      sign = SignState.addElement(sign, sign.rows[0].id,
+        SignState.createElement('space', { widthRatio: 0.372, backgroundColor: '#FF0000' }));
+      sign = SignState.addElement(sign, sign.rows[0].id,
+        SignState.createElement('space', { widthRatio: 0.534, backgroundColor: '#FF0000' }));
+      SignRender.renderSignInto(svg, sign, measure);
+      var reds = Array.prototype.filter.call(svg.querySelectorAll('rect'), function (r) {
+        return r.getAttribute('fill') === '#FF0000';
+      });
+      assertEqual(reds.length, 2, '两个背景矩形');
+      var ax = parseFloat(reds[0].getAttribute('x'));
+      var aw = parseFloat(reds[0].getAttribute('width'));
+      var bx = parseFloat(reds[1].getAttribute('x'));
+      assert(Number.isInteger(ax) && Number.isInteger(aw) && Number.isInteger(bx),
+        '背景矩形边界取整');
+      assert(ax + aw >= bx, '相邻背景无缝（' + (ax + aw) + ' >= ' + bx + '）');
+    });
+
     test('Icon 渲染：嵌套 svg、颜色替换、未知 id 回退', function () {
       assert(SignIcons && SignIcons.ALL, '图标库已加载');
       var el = SignState.createElement('icon', { icon: 'stairs', color: '#FF0000' });
@@ -389,13 +458,13 @@
       assertEqual(svg.querySelectorAll('[data-element-id]').length, 0);
     });
 
-    test('元素背景色 rect 覆盖整个元素盒（含 padding）', function () {
+    test('元素背景色 rect 覆盖整个元素盒（含 padding），宽度取整保证无缝', function () {
       var el = SignState.createElement('big-number', {
         text: '4', color: '#000000', backgroundColor: '#FFFFFF',
       });
       var r = SignRender.renderElement(el, 256, measure);
       var bg = r.node.querySelector('rect');
-      assertEqual(bg.getAttribute('width'), String(r.width));
+      assertEqual(bg.getAttribute('width'), String(Math.ceil(r.width))); // 覆盖整盒且取整
       assertEqual(bg.getAttribute('height'), '256');
     });
 

@@ -69,6 +69,9 @@ core.js → icons.js → state.js → render.js → ui.js → presets.js
 - 键盘：Del/Backspace 删除选中元素并取消选中；焦点在输入控件内或模态打开时不拦截。
 - 空行删除免确认（无内容可丢）；含元素的行删除仍弹确认对话框。
 - 拖拽结束设 `suppressClick` 吞掉紧跟的 click，并用 `setTimeout(0)` 立即过期——若落点与按下点不同元素，浏览器不产生 click，标志不能残留吞掉下一次点击。
+- 编辑区显示 `App.fitSignDisplay`：适配画布宽度但缩放不超过 100%（窄标识牌不放大），canvas-wrap 尺寸变化由 ResizeObserver 触发重算。
+- 相邻同背景色元素的无缝：元素背景与命中框宽度向上取整、平移向下取整，边界落在整数像素上相互覆盖，消除抗锯齿透明缝。
+- 面板头部叉键等用 `hidden` 属性控制的元素，需配套显式 CSS 规则（`.icon-btn` 的 display 会覆盖 UA 的 hidden 规则），新增时同步加 `[hidden]` 样式。
 
 ## 测试约定
 

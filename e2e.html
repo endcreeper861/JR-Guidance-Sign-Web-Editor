@@ -913,6 +913,35 @@
       ok('S30 宽度 0 → 灰框消失', $$('#sign-svg .sign-frame').length === 0);
     }
 
+    function s31_miscFixes() {
+      var w = W(), S = w.SignState;
+      // ─ 叉键：关闭后面板回设置且叉键隐藏
+      var el = S.createElement('big-number', { text: '1' });
+      w.App.update(function (st) { return S.addElement(st, st.rows[0].id, el); });
+      w.App.select(el.id);
+      var closeBtn = $('#close-element-btn');
+      ok('S31 选中时叉键可见', closeBtn.offsetParent !== null);
+      closeBtn.click();
+      ok('S31 关闭后面板回标识牌设置', $('#right-panel-title').textContent === '标识牌设置');
+      ok('S31 关闭后叉键隐藏（display:none）', closeBtn.offsetParent === null &&
+        w.getComputedStyle(closeBtn).display === 'none');
+      w.App.select(null);
+      // ─ 窄标识牌显示不放大（缩放 ≤ 100%）
+      w.App.update(function (st) {
+        st = S.updateSignSettings(st, { width: 400 });
+        st = S.clearSign(st);
+        return S.addElement(st, st.rows[0].id, S.createElement('space', { widthRatio: 0.5 }));
+      });
+      var svg = $('#sign-svg');
+      var dispW = parseFloat(svg.style.width) || svg.getBoundingClientRect().width;
+      ok('S31 窄标识牌显示宽度不超过自然宽度（400）', dispW <= 400.5, 'w=' + svg.style.width);
+      // 恢复较宽的牌，显示宽度 = 画布可用宽
+      w.App.update(function (st) { return S.updateSignSettings(st, { width: 2048 }); });
+      var dispW2 = parseFloat(svg.style.width) || 0;
+      var wrapW = w.document.getElementById('canvas-wrap').clientWidth;
+      ok('S31 宽标识牌铺满画布', Math.abs(dispW2 - wrapW) < 2, 'w=' + dispW2 + ' wrap=' + wrapW);
+    }
+
     // ─── 主流程 ───────────────────────────────────────────
 
     var frameEl = document.getElementById('app-frame');
@@ -949,6 +978,7 @@
         s28_centerLaneDrag();
         await s29_deleteKeyAndEmptyRow();
         s30_signFrame();
+        s31_miscFixes();
       }).then(function () {
         var passed = results.filter(function (r) { return r.pass; }).length;
         var total = results.length;

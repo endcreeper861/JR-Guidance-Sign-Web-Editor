@@ -111,6 +111,31 @@ test('大数字字号 1.3 倍、宽度含内边距', () => {
   assert.ok(Math.abs(mt.base - (20 + 60 * 0.975)) < 1e-9);
 });
 
+test('大数字多位数：中段墨区紧排、盒边距与单位数一致', () => {
+  const el = S.createElement('big-number', { text: '14' });
+  const mt = R.elementMetrics(el, 100, measure);
+  // 中段紧排：相邻数字间距与数字线路的墨区间距一致（「1」不再因字距显得松散）
+  const nl = R.elementMetrics(
+    S.createElement('number-line', { lines: [{ number: '14', color: '#000000' }] }),
+    100, measure);
+  assert.deepEqual(mt.digits.map(d => d.ch), ['1', '4']);
+  assert.ok(Math.abs((mt.digits[1].x - mt.digits[0].x) -
+                     (nl.entries[0].digits[1].x - nl.entries[0].digits[0].x)) < 1e-9);
+  // 盒边距与单位数一致：首位墨区 = 首位字形自己的字距边距 lsb（不随位数变大）
+  const ink1 = measure.ink('1', Core.FONT_NUM, 400, 78);
+  const lsb1 = -ink1.abl;
+  assert.ok(Math.abs((mt.digits[0].x - ink1.adv / 2 - ink1.abl) - lsb1) < 1e-9);
+  // 宽度 = 两位的画布前进宽（首末字距边距保留，仅中段收紧）
+  assert.ok(Math.abs(mt.textW - ink1.adv * 2) < 1e-9);
+  assert.equal(mt.width, mt.textW + 40);
+  assert.equal(mt.fontSize, 78);
+  assert.ok(Math.abs(mt.base - (20 + 60 * 0.975)) < 1e-9); // 基线不变
+  // 单位数行为不变
+  const one = R.elementMetrics(S.createElement('big-number', { text: '1' }), 100, measure);
+  assert.equal(one.textW, measure('1', Core.FONT_NUM, 400, 78));
+  assert.ok(Math.abs(one.digits[0].x - one.textW / 2) < 1e-9);
+});
+
 test('数字线路：色条宽、出血高度、单/双位前进量、标签位置', () => {
   const el1 = S.createElement('number-line', { lines: [{ number: '1', color: '#E3002B' }] });
   const mt1 = R.elementMetrics(el1, 100, measure);

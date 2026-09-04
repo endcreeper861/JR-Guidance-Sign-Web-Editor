@@ -31,8 +31,23 @@
       App.layout = SignRender.renderSignInto(svg, App.state, App.measure, {
         selectedElementId: App.selection.elementId,
       });
+      App.fitSignDisplay();
       if (global.SignInteract) SignInteract.renderOverlay(App.layout, App.state);
       if (global.SignPanel) SignPanel.syncRightPanel();
+    },
+
+    /**
+     * 编辑区显示尺寸：适配画布宽度，但缩放不超过 100%——
+     * 窄标识牌不放大（否则行高会被等比放大得过大），宽标识牌铺满画布。
+     * canvas-wrap 尺寸变化（窗口缩放/面板收展）由 ResizeObserver 触发重算（main.js）。
+     */
+    fitSignDisplay: function () {
+      if (!App.layout) return;
+      var svg = document.getElementById('sign-svg');
+      var wrap = document.getElementById('canvas-wrap');
+      if (!svg || !wrap) return;
+      var avail = wrap.clientWidth;
+      if (avail > 0) svg.style.width = Math.min(avail, App.layout.width) + 'px';
     },
 
     /** 选中元素（null = 取消选中，回到标识牌设置） */

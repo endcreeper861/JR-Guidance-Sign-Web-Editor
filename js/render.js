@@ -162,11 +162,33 @@
   function bigNumberMetrics(el, h, m) {
     var p = contentBox(el.props.padding, h);
     var size = p.size * NUM_FONT_RATIO;
-    var w = m(el.props.text, Core.FONT_NUM, 400, size);
+    var text = String(el.props.text == null ? '' : el.props.text);
+    var base = p.t + p.size * NUM_BASE_RATIO;
+    if (text.length < 2) {
+      // 单位数：保持居中于自身宽度的原有排版
+      var w = m(text, Core.FONT_NUM, 400, size);
+      return {
+        pad: p, fontSize: size, textW: w,
+        digits: text ? [{ ch: text, x: w / 2 }] : [],
+        base: base,
+        width: w + p.l + p.r,
+      };
+    }
+    // 多位数：与数字线路同一套 digitLayout 紧排中段（「1」不再因字距显得松散）；
+    // 首末数字保留各自字形的字距边距——盒边距与单位数一致，不随位数变化
+    var layout = digitLayout(text, p.size, size, m);
+    var firstInk = m.ink(text.charAt(0), Core.FONT_NUM, 400, size);
+    var shift = -firstInk.abl - layout.margin;    // 首位墨区从基准边距 M 移至首位字距边距
+    var digits = layout.digits.map(function (d) {
+      return { ch: d.ch, x: d.x + shift };
+    });
+    var lastInk = m.ink(text.charAt(text.length - 1), Core.FONT_NUM, 400, size);
+    var textW = digits[digits.length - 1].x + lastInk.adv / 2;   // 末位前进盒右缘
     return {
-      pad: p, fontSize: size, textW: w,
-      base: p.t + p.size * NUM_BASE_RATIO,
-      width: w + p.l + p.r,
+      pad: p, fontSize: size, textW: textW,
+      digits: digits,
+      base: base,
+      width: textW + p.l + p.r,
     };
   }
 
@@ -552,11 +574,14 @@
   }
 
   function drawBigNumber(g, el, mt) {
-    g.appendChild(mkText(el.props.text, {
-      x: mt.pad.l + mt.textW / 2, y: mt.base,
-      'text-anchor': 'middle',
-      'font-family': Core.FONT_NUM, 'font-size': mt.fontSize, fill: el.props.color,
-    }));
+    // 逐字按 digitLayout 的墨区坐标绘制（多位数间距紧致，单位数单字居中）
+    mt.digits.forEach(function (d) {
+      g.appendChild(mkText(d.ch, {
+        x: mt.pad.l + d.x, y: mt.base,
+        'text-anchor': 'middle',
+        'font-family': Core.FONT_NUM, 'font-size': mt.fontSize, fill: el.props.color,
+      }));
+    });
   }
 
   function drawNumberLine(g, el, mt) {
@@ -652,15 +677,18 @@
     }
     var mt = elementMetrics(el, rowHeight, measure);
     var w = Math.max(mt.width, 1);
+    // 背景与命中框宽度向上取整：与相邻元素的取整平移相互覆盖，
+    // 消除同色背景元素之间的亚像素透明缝
+    var boxW = Math.ceil(w);
     // 元素背景色（含 padding 区，覆盖整个元素盒）
     var bg = el.props.backgroundColor;
     if (bg) {
-      g.appendChild(mk('rect', { x: 0, y: 0, width: w, height: rowHeight, fill: bg }));
+      g.appendChild(mk('rect', { x: 0, y: 0, width: boxW, height: rowHeight, fill: bg }));
     }
     (DRAW_FNS[el.type] || drawSpace)(g, el, mt);
     if (!opts.clean) {
       g.appendChild(mk('rect', {
-        class: 'hitbox', x: 0, y: 0, width: w, height: rowHeight,
+        class: 'hitbox', x: 0, y: 0, width: boxW, height: rowHeight,
         fill: 'transparent', 'pointer-events': 'all',
       }));
     }
@@ -706,7 +734,8 @@
       for (var ei = 0; ei < row.elements.length; ei++) {
         var el = row.elements[ei];
         var rendered = renderElement(el, sign.rowHeight, measure, { clean: options.clean });
-        rendered.node.setAttribute('transform', 'translate(' + rowLayout.elements[ei].x + ',' + rowLayout.y + ')');
+        // 平移向下取整：相邻元素背景边界落在整数像素上，避免抗锯齿透明缝
+        rendered.node.setAttribute('transform', 'translate(' + Math.floor(rowLayout.elements[ei].x) + ',' + rowLayout.y + ')');
         if (options.selectedElementId === el.id) {
           rendered.node.setAttribute('class', 'element selected');
         }

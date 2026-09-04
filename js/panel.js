@@ -893,6 +893,12 @@
     w.value = el.props.widthRatio;
     bindSync(w, function () { return live().props.widthRatio; });
     root.appendChild(field('宽度（× 行高的倍数）', w));
+    root.appendChild(field('背景色', buildColorPicker({
+      value: el.props.backgroundColor,
+      nullable: true,
+      getValue: function () { return live().props.backgroundColor; },
+      onChange: function (v) { patchProps(el.id, { backgroundColor: v }); },
+    })));
   }
 
   /**

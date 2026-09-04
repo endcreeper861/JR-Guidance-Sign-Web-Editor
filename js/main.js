@@ -58,6 +58,13 @@
       if (App.presetPreviewId) App.previewPreset(null);
       else App.select(null);
     });
+
+    // 画布尺寸变化（窗口缩放、面板收展）时重算编辑区显示尺寸
+    if (window.ResizeObserver) {
+      new ResizeObserver(function () { App.fitSignDisplay(); })
+        .observe(document.getElementById('canvas-wrap'));
+    }
+    window.addEventListener('resize', function () { App.fitSignDisplay(); });
   }
 
   /** 关闭页面前立即落盘未防抖的最后一次变更 */

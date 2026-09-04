@@ -336,6 +336,8 @@ input, select {
 /* 空状态提示 */
 
 #empty-hint[hidden] { display: none; }
+/* 叉键为 inline-flex 的作者样式会覆盖 hidden 属性的 UA 规则，需显式声明 */
+#close-element-btn[hidden] { display: none; }
 #empty-hint {
   position: absolute;
   inset: 0;

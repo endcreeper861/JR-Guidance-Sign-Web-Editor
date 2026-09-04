@@ -54,7 +54,7 @@
       padding: { top: 0.2, right: 0.2, bottom: 0.2, left: 0.2 },
     },
     'number-line': {
-      lines: [{ number: '1', color: '#E3002B' }],
+      lines: [{ number: '1', color: '#E4002B' }],   // 默认重庆地铁 1 号线红
       textColor: '#000000',
       align: 'left',                // 内容对齐（left|right）：右对齐时色块移至右缘，仅渲染第 1 条线路
       backgroundColor: null,
@@ -65,7 +65,7 @@
       text: '环',                   // 色条右侧大字（思源黑体）
       textEn: 'Loop Line',          // 英文线路名，与「线」组合显示
       nameSink: true,               // 线路名下沉：大字显示并与「线」组合；关闭则与「线」同字号完整显示
-      blockColor: '#461D84',        // 贯穿色条颜色（默认 4 号线环线紫）
+      blockColor: '#F2A900',        // 贯穿色条颜色（默认重庆环线黄）
       textColor: '#000000',
       align: 'left',                // 内容对齐（left|right）：右对齐时色块移至右缘
       backgroundColor: null,
@@ -89,6 +89,7 @@
     },
     'space': {
       widthRatio: 0.5,              // 宽度 = 行高 × 此比例
+      backgroundColor: null,        // null = 透明，可选背景色
       elementAlign: 'left',
       padding: { top: 0, right: 0, bottom: 0, left: 0 },
     },
@@ -353,7 +354,6 @@
       props.backgroundColor = sanitizeColor(props.backgroundColor, null);
     }
     if (el.type === 'exit') props.backgroundColor = Core.EXIT_COLOR;
-    if (el.type === 'space') delete props.backgroundColor;
     if (props.elementAlign !== 'center' && props.elementAlign !== 'right') props.elementAlign = 'left';
     // 内容对齐仅这三类元素支持，且只有 left|right 两档；双语文本的 align（left|center|right）不受影响
     if (CONTENT_ALIGN_TYPES.indexOf(el.type) !== -1 && props.align !== 'right') props.align = 'left';

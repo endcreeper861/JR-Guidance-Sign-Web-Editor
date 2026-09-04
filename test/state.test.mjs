@@ -143,14 +143,14 @@ test('createElement 各类型默认值齐全，padding 深合并', () => {
   assert.equal(a.props.padding.top, 0.2); // 未指定的方向保留默认
 
   const nl = S.createElement('number-line');
-  assert.deepEqual(nl.props.lines, [{ number: '1', color: '#E3002B' }]);
+  assert.deepEqual(nl.props.lines, [{ number: '1', color: '#E4002B' }]); // 默认重庆 1 号线红
 
   const ex = S.createElement('exit');
   assert.equal(ex.props.backgroundColor, '#F7D917');
 
   const sp = S.createElement('space');
   assert.equal(sp.props.widthRatio, 0.5);
-  assert.ok(!('backgroundColor' in sp.props));
+  assert.equal(sp.props.backgroundColor, null); // 空白占位默认透明，可选背景色
 });
 
 test('createElement 生成唯一 id', () => {
@@ -443,7 +443,7 @@ test('deserialize 修补 number-line.lines 垃圾数据（非数组崩溃回归�
     sign: { rows: [{ id: 'r', elements: [{ id: 'e', type: 'number-line', props: { lines: '12' } }] }] },
   });
   assert.deepEqual(notArray.rows[0].elements[0].props.lines,
-    [{ number: '1', color: '#E3002B' }]);      // 非数组回退默认线路
+    [{ number: '1', color: '#E4002B' }]);      // 非数组回退默认线路
 
   const dirty = S.deserializeSign({
     sign: {
@@ -528,7 +528,7 @@ test('deserialize 文本属性强制字符串、颜色属性规范化', () => {
   assert.equal(b.props.text, '[object Object]'); // 非字符串强制 String，不崩溃
   assert.equal(c.props.code, '9');
   assert.equal(d.props.textColor, '#000000');
-  assert.equal(d.props.blockColor, '#461D84');
+  assert.equal(d.props.blockColor, '#F2A900');
   assert.equal(e.props.textColor, '#000000');
 });
 
