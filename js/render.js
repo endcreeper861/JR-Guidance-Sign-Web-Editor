@@ -524,11 +524,12 @@
     }));
   }
 
-  // 各元素绘制函数：在局部坐标（元素盒原点）内绘制
+  // 各元素绘制函数：在局部坐标（元素盒原点）内绘制。
+  // 签名 (g, el, mt)：mt 为 renderElement 已算好的该元素 metrics，
+  // draw 不得再调用 metrics 函数（同一元素每次渲染只测量一次，且坐标只有一套来源）。
   var DRAW_FNS;
 
-  function drawArrow(g, el, h, m) {
-    var mt = arrowMetrics(el, h, m);
+  function drawArrow(g, el, mt) {
     var ox = mt.offset.x, oy = mt.offset.y;
     [mt.geo.head1, mt.geo.head2, mt.geo.shaft].forEach(function (poly) {
       g.appendChild(mk('polygon', {
@@ -538,8 +539,7 @@
     });
   }
 
-  function drawBilingualText(g, el, h, m) {
-    var mt = bilingualTextMetrics(el, h, m);
+  function drawBilingualText(g, el, mt) {
     // 对齐基准是纯文本区宽度；mt.width 已含 padding，须换回 textW 视图，
     // 否则右/居中对齐会把文字推出内容盒（越出选中虚线框）。
     var label = {
@@ -551,8 +551,7 @@
       el.props.color, el.props.align, mt.pad.size);
   }
 
-  function drawBigNumber(g, el, h, m) {
-    var mt = bigNumberMetrics(el, h, m);
+  function drawBigNumber(g, el, mt) {
     g.appendChild(mkText(el.props.text, {
       x: mt.pad.l + mt.textW / 2, y: mt.base,
       'text-anchor': 'middle',
@@ -560,8 +559,7 @@
     }));
   }
 
-  function drawNumberLine(g, el, h, m) {
-    var mt = numberLineMetrics(el, h, m);
+  function drawNumberLine(g, el, mt) {
     mt.entries.forEach(function (e) {
       g.appendChild(mk('rect', {
         x: e.stripeX, y: mt.pad.t, width: e.stripeW, height: mt.stripeH, fill: e.color,
@@ -577,8 +575,7 @@
     drawBilingualBox(g, '号线', 'Line', mt.label, mt.labelX, mt.pad.t, el.props.textColor, mt.labelAlign, 0);
   }
 
-  function drawTextLine(g, el, h, m) {
-    var mt = textLineMetrics(el, h, m);
+  function drawTextLine(g, el, mt) {
     // 贯穿色条：内容顶 → 行底，同数字线路；内容右对齐时位于元素右缘
     g.appendChild(mk('rect', {
       x: mt.stripeX, y: mt.pad.t, width: mt.stripeW, height: mt.stripeH,
@@ -600,7 +597,7 @@
     drawBilingualBox(g, '线', el.props.textEn, mt.label, mt.labelX, mt.pad.t, el.props.textColor, mt.labelAlign, 0);
   }
 
-  function drawCodeLabel(g, el, h, m, mt, labelZh, labelEn) {
+  function drawCodeLabel(g, el, mt, labelZh, labelEn) {
     g.appendChild(mkText(el.props.code, {
       x: mt.codeCenterX, y: mt.codeBase,
       'text-anchor': 'middle',
@@ -609,21 +606,20 @@
     drawBilingualBox(g, labelZh, labelEn, mt.label, mt.labelX, mt.pad.t, el.props.color, mt.labelAlign, 0);
   }
 
-  function drawEntrance(g, el, h, m) {
-    drawCodeLabel(g, el, h, m, entranceMetrics(el, h, m), '出入口', 'Entrance');
+  function drawEntrance(g, el, mt) {
+    drawCodeLabel(g, el, mt, '出入口', 'Entrance');
   }
 
-  function drawExit(g, el, h, m) {
-    drawCodeLabel(g, el, h, m, exitMetrics(el, h, m), '出口', 'Exit');
+  function drawExit(g, el, mt) {
+    drawCodeLabel(g, el, mt, '出口', 'Exit');
   }
 
   function drawSpace() { /* 空白占位，无可见内容 */ }
 
-  function drawIcon(g, el, h, m) {
+  function drawIcon(g, el, mt) {
     var lib = global.SignIcons;
     if (!HAS_DOM || !lib) return;
     var icon = lib.get(el.props.icon);
-    var mt = iconMetrics(el, h, m);
     var color = el.props.color || '#000000';
     var nested = mk('svg', {
       x: mt.pad.l, y: mt.pad.t, width: mt.size, height: mt.size,
@@ -661,7 +657,7 @@
     if (bg) {
       g.appendChild(mk('rect', { x: 0, y: 0, width: w, height: rowHeight, fill: bg }));
     }
-    (DRAW_FNS[el.type] || drawSpace)(g, el, rowHeight, measure);
+    (DRAW_FNS[el.type] || drawSpace)(g, el, mt);
     if (!opts.clean) {
       g.appendChild(mk('rect', {
         class: 'hitbox', x: 0, y: 0, width: w, height: rowHeight,

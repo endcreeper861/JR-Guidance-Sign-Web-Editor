@@ -76,10 +76,12 @@
   }
 
   function writeInstance() {
-    localStorage.setItem(INSTANCE_KEY, JSON.stringify({
-      id: instanceId,
-      ts: Date.now(),
-    }));
+    try {
+      localStorage.setItem(INSTANCE_KEY, JSON.stringify({
+        id: instanceId,
+        ts: Date.now(),
+      }));
+    } catch (e) { /* 存储被禁/写满：守卫退化为无心跳，不致命 */ }
   }
 
   /**
@@ -171,10 +173,12 @@
       input.accept = '.json,application/json';
       input.style.display = 'none';
       document.body.appendChild(input);
-      input.addEventListener('change', function () {
+      function done() {
         input.remove();
         resolve(input.files[0] || null);
-      });
+      }
+      input.addEventListener('change', done);
+      input.addEventListener('cancel', done); // 用户取消也须结算并移除节点
       input.click();
     });
   }

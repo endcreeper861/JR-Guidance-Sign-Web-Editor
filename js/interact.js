@@ -416,7 +416,7 @@
     var kind = readDragKind(ev);
     if (!kind) return; // 非本应用拖拽，不拦截
     ev.preventDefault();
-    ev.dataTransfer.dropEffect = kind === 'preset' ? 'copy' : 'copy';
+    ev.dataTransfer.dropEffect = 'copy';
 
     var pt = toSignPoint(ev);
     clearRowHighlights();
@@ -495,16 +495,17 @@
   // ─── 行管理动作 ────────────────────────────────────────────
 
   function confirmDeleteRow(index) {
-    var row = App.state.rows[index];
-    if (row.elements.length === 0) {
+    var rowId = App.state.rows[index].id;
+    if (App.state.rows[index].elements.length === 0) {
       // 空行无内容可丢，直接删除免去确认
-      App.update(function (st) { return State.deleteRow(st, st.rows[index].id); });
+      App.update(function (st) { return State.deleteRow(st, rowId); });
       SignUI.toast('已删除空行');
       return;
     }
-    SignUI.confirmDialog('确定要删除此行吗？行内 ' + row.elements.length + ' 个元素将一并删除。', '删除行', '删除').then(function (ok) {
+    SignUI.confirmDialog('确定要删除此行吗？行内 ' + App.state.rows[index].elements.length + ' 个元素将一并删除。', '删除行', '删除').then(function (ok) {
       if (!ok) return;
-      App.update(function (st) { return State.deleteRow(st, st.rows[index].id); });
+      // 确认回调时行序可能已变，按 id 删而非按下标
+      App.update(function (st) { return State.deleteRow(st, rowId); });
       SignUI.toast('行已删除');
     });
   }

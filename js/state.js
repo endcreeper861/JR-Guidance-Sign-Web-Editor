@@ -309,7 +309,40 @@
     return Core.normalizeHex(c) || fallback;
   }
 
-  /** 校验并修补单个元素：未知类型返回 null */
+  /** 文本属性强制字符串：null/undefined 回默认，其余 String 化（渲染层只认字符串） */
+  function sanitizeText(v, fallback) {
+    if (typeof v === 'string') return v;
+    return v === undefined || v === null ? fallback : String(v);
+  }
+
+  /** 数值属性：非有限数回默认，否则夹到 [lo, hi] */
+  function sanitizeNumber(v, lo, hi, fallback) {
+    var n = Number(v);
+    return isFinite(n) ? Core.clamp(n, lo, hi) : fallback;
+  }
+
+  var ARROW_DIRECTIONS = [
+    'up', 'down', 'left', 'right', 'left-up', 'right-up', 'right-down', 'left-down',
+  ];
+
+  /**
+   * 数字线路列表：必须收敛为 [{ number: string, color: #RRGGBB }]。
+   * 非数组的 lines 会让渲染层 .map 崩溃（历史导入崩溃点）；非对象项剔除；
+   * 空数组合法（面板允许移除全部线路）。
+   */
+  function sanitizeLines(v) {
+    if (!Array.isArray(v)) return Core.deepClone(DEFAULT_PROPS['number-line'].lines);
+    return v.filter(isPlainObject).map(function (l) {
+      return {
+        number: sanitizeText(l.number, ''),
+        color: sanitizeColor(l.color, '#424A52'),
+      };
+    });
+  }
+
+  /** 校验并修补单个元素：未知类型返回 null。
+   *  反序列化是外部数据的唯一入口，凡渲染层假定过的形状（数组/数值/枚举/字符串）
+   *  都必须在此收敛，否则一份手改的项目 JSON 就能让整牌渲染崩溃。 */
   function sanitizeElement(el) {
     if (!isPlainObject(el) || ELEMENT_TYPES.indexOf(el.type) === -1) return null;
     var defaults = DEFAULT_PROPS[el.type];
@@ -318,7 +351,6 @@
     if (props.color !== undefined) props.color = sanitizeColor(props.color, '#000000');
     if (props.backgroundColor !== undefined && props.backgroundColor !== null) {
       props.backgroundColor = sanitizeColor(props.backgroundColor, null);
-      if (!isHexColorSafe(props.backgroundColor)) props.backgroundColor = null;
     }
     if (el.type === 'exit') props.backgroundColor = Core.EXIT_COLOR;
     if (el.type === 'space') delete props.backgroundColor;
@@ -326,15 +358,36 @@
     // 内容对齐仅这三类元素支持，且只有 left|right 两档；双语文本的 align（left|center|right）不受影响
     if (CONTENT_ALIGN_TYPES.indexOf(el.type) !== -1 && props.align !== 'right') props.align = 'left';
     if (el.type === 'icon' && typeof props.icon !== 'string') props.icon = 'elevator';
+
+    if (el.type === 'arrow') {
+      if (ARROW_DIRECTIONS.indexOf(props.direction) === -1) props.direction = 'left';
+      props.thicknessRatio = sanitizeNumber(props.thicknessRatio, 0.05, 0.95, defaults.thicknessRatio);
+    } else if (el.type === 'bilingual-text') {
+      props.textZh = sanitizeText(props.textZh, defaults.textZh);
+      props.textEn = sanitizeText(props.textEn, defaults.textEn);
+      props.bold = !!props.bold;
+      if (props.align !== 'left' && props.align !== 'right') props.align = 'center';
+    } else if (el.type === 'big-number') {
+      props.text = sanitizeText(props.text, defaults.text);
+    } else if (el.type === 'number-line') {
+      props.lines = sanitizeLines(props.lines);
+      props.textColor = sanitizeColor(props.textColor, '#000000');
+    } else if (el.type === 'text-line') {
+      props.text = sanitizeText(props.text, defaults.text);
+      props.textEn = sanitizeText(props.textEn, defaults.textEn);
+      props.nameSink = props.nameSink !== false; // 缺省视为开启（历史数据兼容）
+      props.blockColor = sanitizeColor(props.blockColor, defaults.blockColor);
+      props.textColor = sanitizeColor(props.textColor, '#000000');
+    } else if (el.type === 'entrance' || el.type === 'exit') {
+      props.code = sanitizeText(props.code, defaults.code);
+    } else if (el.type === 'space') {
+      props.widthRatio = sanitizeNumber(props.widthRatio, 0, 8, defaults.widthRatio);
+    }
     return {
       id: typeof el.id === 'string' && el.id ? el.id : uuid(),
       type: el.type,
       props: props,
     };
-  }
-
-  function isHexColorSafe(s) {
-    return s === null || typeof s === 'string';
   }
 
   /**
@@ -363,6 +416,16 @@
     if (!isFinite(frameWidth) || frameWidth < 0) frameWidth = 0;
     if (frameWidth > 512) frameWidth = 512;
 
+    var seenRowIds = {};
+    var seenElementIds = {};
+    /** 重复 id 会让 data-element-id 查询与选中态指向歧义节点，重新生成 */
+    function pickUniqueId(id, seen) {
+      var usable = typeof id === 'string' && id && !seen[id];
+      var final = usable ? id : uuid();
+      seen[final] = true;
+      return final;
+    }
+
     var rows = sign.rows.map(function (row) {
       if (!isPlainObject(row) || !Array.isArray(row.elements)) {
         throw new Error('存在无效的行');
@@ -370,10 +433,13 @@
       var elements = [];
       row.elements.forEach(function (el) {
         var ok = sanitizeElement(el);
-        if (ok) elements.push(ok);
+        if (ok) {
+          ok.id = pickUniqueId(ok.id, seenElementIds);
+          elements.push(ok);
+        }
       });
       return {
-        id: typeof row.id === 'string' && row.id ? row.id : uuid(),
+        id: pickUniqueId(row.id, seenRowIds),
         elements: elements,
       };
     });

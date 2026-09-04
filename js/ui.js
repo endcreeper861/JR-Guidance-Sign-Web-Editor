@@ -40,8 +40,7 @@
       if (App.selection.elementId === elementId) return;
       App.selection.elementId = elementId;
       if (elementId !== null) App.presetPreviewId = null;
-      App.renderAll();
-      if (global.SignPanel) SignPanel.syncRightPanel();
+      App.renderAll(); // renderAll 内部已含右栏同步
     },
 
     /** 进入预设预览模式 */
@@ -49,7 +48,6 @@
       App.presetPreviewId = presetId;
       App.selection.elementId = null;
       App.renderAll();
-      if (global.SignPanel) SignPanel.syncRightPanel();
     },
   };
   global.App = App;

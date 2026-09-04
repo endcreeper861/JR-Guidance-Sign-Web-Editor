@@ -86,9 +86,10 @@ AGENTS.md             AI 协作指引
 | [CONTEXT.md](CONTEXT.md) | 领域术语表（标识牌/行/元素/元素对齐/图标等，含"避免用词"） |
 | [docs/development.md](docs/development.md) | 开发指南：架构、状态流、新增元素类型清单、字体与图标管线、测试约定 |
 | [docs/adr/0001-svg-rendering-engine.md](docs/adr/0001-svg-rendering-engine.md) | ADR：为什么选 SVG 作为渲染引擎 |
+| [docs/code-review-2026-09.md](docs/code-review-2026-09.md) | 代码审阅记录：隐患清单、修改措施与"审阅过但不改"的决策 |
 | [AGENTS.md](AGENTS.md) | AI 协作快速上手 |
 
 ## 字体与图标来源
 
 - `fonts/` 与 `fonts-data.js` 为构建产物：思源黑体子集化（GB2312 全量字符，fonttools 生成）+ Helvetica / Frutiger（数字与西文）。**不要手工编辑**，再生成管线见 [docs/development.md](docs/development.md)。
-- 服务设施与方向图标移植自 [signmaker-main](https://github.com/) 项目的 `icon` 目录，已内嵌为 SVG path 数据。
+- 服务设施与方向图标移植自 signmaker-main 项目的 `icon` 目录，已内嵌为 SVG path 数据。

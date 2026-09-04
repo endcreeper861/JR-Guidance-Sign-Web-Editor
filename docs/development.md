@@ -32,7 +32,7 @@ core.js → icons.js → state.js → render.js → ui.js → presets.js
 每个元素类型实现两个函数：
 
 1. **metrics**（纯几何，输入 `(element, rowHeight, measure)`，Node 可测）：输出宽度与该元素全部绘制坐标（基线、色条矩形、分割位置等）。
-2. **draw**（消费 metrics 生成 SVG DOM）：除坐标外不含任何布局逻辑。
+2. **draw**（消费 metrics 生成 SVG DOM）：签名 `(g, el, mt)`，`mt` 是 `renderElement` 已算好的该元素 metrics。**draw 内不得再调用 metrics 函数**——每个元素每次渲染只测量一次文本，且绘制坐标只有 metrics 一套来源（两处各算一遍迟早漂移）。
 
 两轨共享同一套公式是"所见即所得"的根基——改排版只改 metrics，draw 自动跟随。排版常量移植自参考实现 `sign_jr.py`。
 
@@ -82,7 +82,7 @@ HTTP 缓存坑：改完 js 后浏览器可能仍跑旧代码（症状：失败�
 
 ## 新增元素类型清单
 
-1. `state.js`：`ELEMENT_TYPES` 加类型；`DEFAULT_PROPS` 加默认 props（含 `elementAlign`、`padding`）；如需特殊校验在 `sanitizeElement` 补充。
+1. `state.js`：`ELEMENT_TYPES` 加类型；`DEFAULT_PROPS` 加默认 props（含 `elementAlign`、`padding`）；**必须在 `sanitizeElement` 为新属性补校验**——反序列化是外部数据（导入 JSON / 存档）进入渲染层的唯一闸门，凡渲染层假定过的形状（数组、数值、枚举、字符串）都要收敛，否则一份手改 JSON 就能让整牌渲染崩溃（历史教训见 [code-review-2026-09.md](code-review-2026-09.md) P1-1）。校验对合法值必须是恒等变换，保证 serialize → deserialize 往返不变。
 2. `render.js`：metrics 函数 + draw 函数，注册进 `METRICS_FNS` / `DRAW_FNS`。
 3. `panel.js`：`TYPE_NAMES` 加名称；类型 switch 加 `build*Fields`（属性控件，取值一律经 `live()`）；需要进左栏则加 `CATEGORIES`；`describeElement` 加描述。
 4. `exporters.js`：如使用文本，`collectUsedFonts` 补字体收集。

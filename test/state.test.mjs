@@ -437,6 +437,116 @@ test('icon：icon id 非字符串回退默认', () => {
   assert.equal(s.rows[0].elements[0].props.icon, 'elevator');
 });
 
+test('deserialize 修补 number-line.lines 垃圾数据（非数组崩溃回归）', () => {
+  // 历史 bug：lines 为字符串/对象时 numberLineMetrics 调 .map 直接抛错，整牌渲染崩溃
+  const notArray = S.deserializeSign({
+    sign: { rows: [{ id: 'r', elements: [{ id: 'e', type: 'number-line', props: { lines: '12' } }] }] },
+  });
+  assert.deepEqual(notArray.rows[0].elements[0].props.lines,
+    [{ number: '1', color: '#E3002B' }]);      // 非数组回退默认线路
+
+  const dirty = S.deserializeSign({
+    sign: {
+      rows: [{
+        id: 'r',
+        elements: [{
+          id: 'e', type: 'number-line',
+          props: {
+            lines: [{ number: 42 }, { number: '2', color: 'bogus' }, 'junk'],
+          },
+        }],
+      }],
+    },
+  });
+  assert.deepEqual(dirty.rows[0].elements[0].props.lines,
+    [{ number: '42', color: '#424A52' }, { number: '2', color: '#424A52' }]);
+  // 空数组合法（面板可移除全部线路），不得被改写
+  const empty = S.deserializeSign({
+    sign: { rows: [{ id: 'r', elements: [{ id: 'e', type: 'number-line', props: { lines: [] } }] }] },
+  });
+  assert.deepEqual(empty.rows[0].elements[0].props.lines, []);
+});
+
+test('deserialize 收敛数值属性：widthRatio / thicknessRatio', () => {
+  const s = S.deserializeSign({
+    sign: {
+      rows: [{
+        id: 'r',
+        elements: [
+          { id: 'a', type: 'space', props: { widthRatio: 'x' } },
+          { id: 'b', type: 'space', props: { widthRatio: -3 } },
+          { id: 'c', type: 'space', props: { widthRatio: 99 } },
+          { id: 'd', type: 'arrow', props: { thicknessRatio: 5 } },
+          { id: 'f', type: 'arrow', props: { thicknessRatio: 'oops' } },
+        ],
+      }],
+    },
+  });
+  const els = s.rows[0].elements;
+  assert.equal(els[0].props.widthRatio, 0.5);    // 非数值回默认
+  assert.equal(els[1].props.widthRatio, 0);      // 负值收敛 0
+  assert.equal(els[2].props.widthRatio, 8);      // 超上限截断（与面板一致）
+  assert.equal(els[3].props.thicknessRatio, 0.95);
+  assert.equal(els[4].props.thicknessRatio, 0.25);
+});
+
+test('deserialize 枚举属性：arrow.direction 与 bilingual-text.align 归一', () => {
+  const s = S.deserializeSign({
+    sign: {
+      rows: [{
+        id: 'r',
+        elements: [
+          { id: 'a', type: 'arrow', props: { direction: 'sideways' } },
+          { id: 'b', type: 'bilingual-text', props: { align: 'justify' } },
+        ],
+      }],
+    },
+  });
+  assert.equal(s.rows[0].elements[0].props.direction, 'left');
+  assert.equal(s.rows[0].elements[1].props.align, 'center');
+});
+
+test('deserialize 文本属性强制字符串、颜色属性规范化', () => {
+  const s = S.deserializeSign({
+    sign: {
+      rows: [{
+        id: 'r',
+        elements: [
+          { id: 'a', type: 'bilingual-text', props: { textZh: 123, textEn: null, bold: 'yes' } },
+          { id: 'b', type: 'big-number', props: { text: { bad: 1 } } },
+          { id: 'c', type: 'exit', props: { code: 9 } },
+          { id: 'd', type: 'text-line', props: { text: '环', textColor: 'junk', blockColor: 'junk' } },
+          { id: 'e', type: 'number-line', props: { lines: [], textColor: 'junk' } },
+        ],
+      }],
+    },
+  });
+  const [a, b, c, d, e] = s.rows[0].elements;
+  assert.equal(a.props.textZh, '123');
+  assert.equal(a.props.textEn, 'Station');       // null 回默认（渲染层空串安全）
+  assert.equal(a.props.bold, true);              // 布尔化
+  assert.equal(b.props.text, '[object Object]'); // 非字符串强制 String，不崩溃
+  assert.equal(c.props.code, '9');
+  assert.equal(d.props.textColor, '#000000');
+  assert.equal(d.props.blockColor, '#461D84');
+  assert.equal(e.props.textColor, '#000000');
+});
+
+test('deserialize 重复 id 重新生成（行与元素分别去重）', () => {
+  const s = S.deserializeSign({
+    sign: {
+      rows: [
+        { id: 'dup', elements: [{ id: 'x', type: 'space' }, { id: 'x', type: 'space' }] },
+        { id: 'dup', elements: [] },
+      ],
+    },
+  });
+  const rowIds = s.rows.map((r) => r.id);
+  assert.equal(new Set(rowIds).size, 2);
+  const elIds = s.rows[0].elements.map((e) => e.id);
+  assert.equal(new Set(elIds).size, 2);
+});
+
 test('findElement 全牌搜索', () => {
   let s = S.createSign();
   s = S.addRow(s);

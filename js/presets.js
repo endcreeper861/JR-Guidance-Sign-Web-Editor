@@ -28,7 +28,12 @@
   }
 
   function persist(items) {
-    localStorage.setItem(KEY, JSON.stringify(items));
+    try {
+      localStorage.setItem(KEY, JSON.stringify(items));
+    } catch (e) {
+      console.error('预设保存失败', e);
+      return; // 写盘失败时不触发变更通知，UI 与存储保持一致
+    }
     listeners.forEach(function (fn) { fn(); });
   }
 

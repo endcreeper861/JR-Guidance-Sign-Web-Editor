@@ -35,4 +35,5 @@ node --test                        # 状态 + 纯几何（假 measurer，Node �
 | docs/development.md | 架构详解、状态流、新增元素类型清单、字体/图标管线 |
 | CONTEXT.md | 领域术语表（含避免用词） |
 | docs/adr/ | 架构决策记录（0001：SVG 渲染引擎） |
+| docs/code-review-2026-09.md | 代码审阅记录：隐患清单、修改措施与"审阅过但不改"的决策 |
 | README.md | 面向使用者的介绍与部署说明 |

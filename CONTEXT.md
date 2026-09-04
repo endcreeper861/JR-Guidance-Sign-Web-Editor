@@ -44,7 +44,7 @@ _Avoid_: 元件库、工具箱、侧边栏
 _Avoid_: 模板、组合、combo
 
 **图标 (Icon)**:
-服务设施（电梯、洗手间、楼梯等）与方向 pictogram 元素，库见 `web-app/js/icons.js`（由 `web-app/gen-icons.mjs` 从外部 SVG 生成，勿手工编辑）。图形为内嵌 SVG path，渲染时 `fill="black"` 替换为元素颜色，白色部分保留（色底白图形的 tile 风格）。不依赖字体，导出自包含。
+服务设施（电梯、洗手间、楼梯等）与方向 pictogram 元素，库见 `js/icons.js`（由 `gen-icons.mjs` 从外部 SVG 生成，勿手工编辑）。图形为内嵌 SVG path，渲染时 `fill="black"` 替换为元素颜色，白色部分保留（色底白图形的 tile 风格）。不依赖字体，导出自包含。
 _Avoid_: 图片、emoji、pictogram
 
 **元素对齐 (Element Align)**:
