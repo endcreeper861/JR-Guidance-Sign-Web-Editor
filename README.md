@@ -1,5 +1,7 @@
 # JR-Guidance-Sign-Web-Editor
 
+**在线使用：** <https://endcreeper861.github.io/JR-Guidance-Sign-Web-Editor/>
+
 JR风格导向标识牌 Web 编辑器。类似国内的重庆轨道交通（CRT）、成都地铁风格，但不完全相同。
 
 打开 `index.html` 即可使用，所见即所得地编辑由多行元素组成的导向标识牌，并导出为自包含的 SVG / PNG。
