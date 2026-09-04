@@ -1,0 +1,973 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>E2E 交互测试</title>
+  <style>
+    body { font-family: Consolas, monospace; background: #111; color: #ddd; padding: 12px; font-size: 13px; }
+    h1 { font-size: 15px; color: #fff; }
+    .case { margin: 2px 0; }
+    .pass { color: #4ade80; } .fail { color: #f87171; }
+    .detail { white-space: pre-wrap; margin-left: 2em; color: #fca5a5; }
+    #summary { font-size: 16px; font-weight: bold; margin: 8px 0; }
+    iframe { display: block; width: 1280px; height: 860px; border: 2px solid #444; margin-top: 10px; background: #fff; }
+    button { font-size: 14px; padding: 6px 14px; }
+  </style>
+</head>
+<body>
+  <h1>导向标识生成器 — E2E 交互测试（iframe 驱动）</h1>
+  <div id="summary">运行中…</div>
+  <div id="results"></div>
+  <iframe id="app-frame" src="index.html"></iframe>
+
+  <script>
+    // ─── 微型测试框架 ─────────────────────────────────────
+    var results = [];
+    var frame = document.getElementById('app-frame');
+
+    function ok(name, cond, detail) {
+      results.push({ name: name, pass: !!cond, detail: detail ? String(detail) : '' });
+      var div = document.createElement('div');
+      div.className = 'case ' + (cond ? 'pass' : 'fail');
+      div.textContent = (cond ? '✔ ' : '✖ ') + name + (cond ? '' : '  —  ' + detail);
+      document.getElementById('results').appendChild(div);
+    }
+
+    function $(sel) { return frame.contentDocument.querySelector(sel); }
+    function $$(sel) { return Array.prototype.slice.call(frame.contentDocument.querySelectorAll(sel)); }
+    function W() { return frame.contentWindow; }
+
+    function rectOf(el) {
+      var r = el.getBoundingClientRect();
+      var fr = frame.getBoundingClientRect();
+      return { x: r.left, y: r.top, w: r.width, h: r.height }; // iframe 内坐标即 client 坐标系
+    }
+
+    function mouse(type, target, x, y) {
+      target.dispatchEvent(new MouseEvent(type, {
+        clientX: x, clientY: y, bubbles: true, cancelable: true, button: 0,
+      }));
+    }
+
+    /** 合成指针拖拽（应用监听 mousedown 委托 + document mousemove/up） */
+    function drag(fromEl, toPoint, opts) {
+      var options = opts || {};
+      var r = fromEl.getBoundingClientRect();
+      var sx = options.fromX !== undefined ? options.fromX : r.left + r.width / 2;
+      var sy = options.fromY !== undefined ? options.fromY : r.top + r.height / 2;
+      mouse('mousedown', fromEl, sx, sy);
+      // 激活阈值 5px
+      mouse('mousemove', W().document, sx + 8, sy + 4);
+      var steps = 6;
+      for (var i = 1; i <= steps; i++) {
+        var x = sx + (toPoint.x - sx) * i / steps;
+        var y = sy + (toPoint.y - sy) * i / steps;
+        mouse('mousemove', W().document, x, y);
+      }
+      mouse('mousemove', W().document, toPoint.x, toPoint.y);
+      mouse('mouseup', W().document, toPoint.x, toPoint.y);
+    }
+
+    /**
+     * 对最顶层（最后 appended）的模态执行动作。
+     * 模态回调（删除/保存等）在 Promise 微任务中执行，
+     * 因此返回 Promise 并延迟一拍，调用方必须 await。
+     */
+    function modalAct(act) {
+      var masks = $$('.modal-mask');
+      var mask = masks[masks.length - 1];
+      mask.querySelector('[data-act="' + act + '"]').click();
+      return new Promise(function (r) { setTimeout(r, 30); });
+    }
+
+    function waitFor(condFn, timeout) {
+      var deadline = Date.now() + (timeout || 1500);
+      return new Promise(function (resolve) {
+        function tick() {
+          try { if (condFn()) { resolve(true); return; } } catch (e) { /* 继续等 */ }
+          if (Date.now() > deadline) { resolve(false); return; }
+          setTimeout(tick, 40);
+        }
+        tick();
+      });
+    }
+
+    function runWhenReady(fn) {
+      return new Promise(function (resolve, reject) {
+        window.__checkCount = 0;
+        window.__lastCheckState = 'init';
+        function check() {
+          window.__checkCount++;
+          var w = W();
+          try {
+            if (!w.document) { window.__lastCheckState = 'no-doc'; setTimeout(check, 100); return; }
+            var blocked = w.document.querySelector('.modal-mask [data-act="ok"]');
+            if (blocked && (!w.App || !w.App.measure)) {
+              window.__lastCheckState = 'blocked-modal';
+              blocked.click();
+              setTimeout(check, 100);
+              return;
+            }
+            var ready = w.App && w.App.measure && w.App.state &&
+              w.document.getElementById('loading-overlay') &&
+              w.document.getElementById('loading-overlay').hidden;
+            window.__lastCheckState = 'app=' + !!w.App + ' measure=' + !!w.App.measure +
+              ' state=' + !!w.App.state + ' hidden=' + (w.document.getElementById('loading-overlay') || {}).hidden;
+            if (ready) {
+              setTimeout(function () {
+                try { resolve(fn()); } catch (e) { reject(e); }
+              }, 150);
+            } else {
+              setTimeout(check, 100);
+            }
+          } catch (e) {
+            window.__lastCheckState = 'ERR: ' + e.message;
+          }
+        }
+        check();
+      });
+    }
+
+    // ─── 场景 ─────────────────────────────────────────────
+
+    function setupScenario() {
+      var w = W(), S = w.SignState;
+      // 干净状态：一行
+      w.App.update(function () {
+        var s = S.createSign();
+        var r1 = s.rows[0].id;
+        s = S.addElement(s, r1, S.createElement('arrow', { direction: 'left' }));
+        s = S.addElement(s, r1, S.createElement('bilingual-text', { textZh: '甲站', textEn: 'Station A' }));
+        s = S.addElement(s, r1, S.createElement('space', { widthRatio: 0.5 }));
+        s = S.addRow(s);
+        s = S.addElement(s, s.rows[1].id, S.createElement('exit', { code: '3' }));
+        localStorage.removeItem('sign-presets');
+        return s;
+      });
+      // 编辑器偏好回到默认基线（存储与内存同步），保证场景间确定性
+      w.App.prefs = { autoLineColor: true, paletteCity: 'shanghai' };
+      localStorage.removeItem('sign-prefs');
+      w.App.select(null);
+      w.App.previewPreset(null);
+      w.App.renderAll();
+    }
+
+    function s01_selectAndPanel() {
+      var w = W();
+      var g = $('#sign-svg g.element'); // 第一个元素 arrow
+      var r = g.getBoundingClientRect();
+      mouse('click', g.querySelector('.hitbox'), r.left + 10, r.top + 10);
+      var title = $('#right-panel-title').textContent;
+      ok('S01 点击元素 → 右栏切换元素属性', title === '元素属性', 'title=' + title);
+      ok('S01 选中类出现在元素上', g.classList.contains('selected') || $('#sign-svg g.element.selected') !== null);
+      // 取消选中：点击空白（sign-bg）
+      mouse('click', $('#sign-svg .sign-bg'), 30, 30);
+      ok('S01 点击空白 → 取消选中', w.App.selection.elementId === null && $('#right-panel-title').textContent === '标识牌设置');
+    }
+
+    function s02_elementDragReorder() {
+      var w = W();
+      var row0 = w.App.state.rows[0];
+      var before = row0.elements.map(function (e) { return e.id; });
+      var gs = $$('g.element[data-row-id="' + row0.id + '"]');
+      var last = gs[gs.length - 1]; // space
+      var first = gs[0];
+      var fr = first.getBoundingClientRect();
+      drag(last, { x: fr.left + 4, y: fr.top + fr.height / 2 });
+      var after = w.App.state.rows[0].elements.map(function (e) { return e.id; });
+      ok('S02 行内拖拽排序：space 移到队首', after[0] === before[2] && after[1] === before[0], 'after=' + after.join(',').slice(0, 40));
+      // 拖回原位（队尾）
+      var g2 = $$('g.element[data-row-id="' + row0.id + '"]')[0];
+      var lastEl = $$('g.element[data-row-id="' + row0.id + '"]');
+      var tail = lastEl[lastEl.length - 1].getBoundingClientRect();
+      drag(g2, { x: tail.right - 4, y: tail.top + tail.height / 2 });
+      var restored = w.App.state.rows[0].elements.map(function (e) { return e.id; });
+      ok('S02 拖回队尾恢复原序', restored.join() === before.join());
+    }
+
+    function s03_crossRowDrag() {
+      var w = W();
+      var row0 = w.App.state.rows[0];
+      var spaceId = row0.elements[2].id;
+      var g = $('g.element[data-element-id="' + spaceId + '"]');
+      var row2g = $$('g.element[data-row-id="' + w.App.state.rows[1].id + '"]');
+      var target = row2g[row2g.length - 1].getBoundingClientRect();
+      drag(g, { x: target.right - 4, y: target.top + target.height / 2 });
+      var moved = w.SignState.findElement(w.App.state, spaceId);
+      ok('S03 跨行拖动：space 移到第 2 行', moved.rowId === w.App.state.rows[1].id, 'rowId=' + moved.rowId);
+      ok('S03 第 1 行剩 2 个元素', w.App.state.rows[0].elements.length === 2);
+    }
+
+    function s04_rowHandleDrag() {
+      var w = W();
+      var firstRowId = w.App.state.rows[0].id;
+      var handle = $('.row-band[data-row-index="0"] .row-handle');
+      var band1 = $('.row-band[data-row-index="1"]');
+      var b1 = band1.getBoundingClientRect();
+      drag(handle, { x: b1.left + 30, y: b1.top + b1.height * 0.75 }, { fromX: handle.getBoundingClientRect().left + 10 });
+      ok('S04 行手柄拖拽：第 1 行移到第 2 行', w.App.state.rows[1].id === firstRowId);
+      // 拖回去
+      var handle2 = $('.row-band[data-row-index="1"] .row-handle');
+      var band0 = $('.row-band[data-row-index="0"]');
+      var b0 = band0.getBoundingClientRect();
+      drag(handle2, { x: b0.left + 30, y: b0.top + 4 }, { fromX: handle2.getBoundingClientRect().left + 10 });
+      ok('S04 拖回恢复行序', w.App.state.rows[0].id === firstRowId);
+    }
+
+    async function s05_deleteRowWithConfirm() {
+      var w = W();
+      var rowsBefore = w.App.state.rows.length;
+      var del = $('.row-band[data-row-index="1"] .row-del');
+      del.click();
+      var modal = $('.modal-mask');
+      ok('S05 删除行弹出确认对话框', !!modal);
+      // 取消 → 不删
+      await modalAct('cancel');
+      ok('S05 取消后行未删除', w.App.state.rows.length === rowsBefore);
+      // 再删 → 确定
+      $('.row-band[data-row-index="1"] .row-del').click();
+      await modalAct('ok');
+      ok('S05 确认后行被删除', w.App.state.rows.length === rowsBefore - 1);
+      // 最后一行不可删
+      var lastDel = $('.row-band .row-del');
+      ok('S05 仅剩一行时删除按钮禁用', lastDel.disabled === true);
+    }
+
+    async function s06_savePresetFlow() {
+      var w = W();
+      $('.row-band .row-actions button').click(); // 存为预设
+      var input = $('.modal-input');
+      ok('S06 弹出命名对话框', !!input);
+      input.value = '测试行';
+      await modalAct('ok');
+      var presets = w.SignPresets.list();
+      ok('S06 预设已保存', presets.length === 1 && presets[0].name === '测试行');
+      ok('S06 左栏出现预设卡片', $$('.preset-card').length === 1 && $$('.preset-card .preset-thumb svg').length === 1);
+      // 删除预设（卡片 ✕）
+      $('.preset-delete').click();
+      await modalAct('ok');
+      ok('S06 预设可删除', w.SignPresets.list().length === 0);
+    }
+
+    function s07_presetPreviewAndDrop() {
+      var w = W(), S = w.SignState, P = w.SignPresets;
+      // 重新存一个预设
+      P.save('落牌预设', [S.createElement('arrow', { direction: 'up' }), S.createElement('space', { widthRatio: 0.3 })]);
+      w.App.renderAll();
+      // 点击卡片 → 预览面板
+      $$('.preset-card')[0].click();
+      ok('S07 点击预设 → 右栏预览', $('#right-panel-title').textContent === '预设预览');
+      w.App.previewPreset(null);
+
+      // HTML5 拖放到空行（构造 DataTransfer 派发 dragover/drop）
+      var dataTransfer = new w.DataTransfer();
+      dataTransfer.setData(w.SignInteract.MIME_PRESET, JSON.stringify({ kind: 'preset', id: P.list()[0].id }));
+      var wrap = $('#canvas-wrap');
+      // 目标：添加一个空行并放入
+      w.App.update(S.addRow);
+      var emptyRowIndex = w.App.state.rows.length - 1;
+      var band = $('.row-band[data-row-index="' + emptyRowIndex + '"]');
+      var br = band.getBoundingClientRect();
+      var ev1 = new w.DragEvent('dragover', { dataTransfer: dataTransfer, clientX: br.left + 100, clientY: br.top + br.height / 2, bubbles: true, cancelable: true });
+      wrap.dispatchEvent(ev1);
+      ok('S07 空行显示可放置高亮', band.classList.contains('drop-ok'));
+      var ev2 = new w.DragEvent('drop', { dataTransfer: dataTransfer, clientX: br.left + 100, clientY: br.top + br.height / 2, bubbles: true, cancelable: true });
+      wrap.dispatchEvent(ev2);
+      var target = w.App.state.rows[emptyRowIndex];
+      ok('S07 预设落入空行（元素替换）', target.elements.length === 2 && target.elements[0].props.direction === 'up',
+        'len=' + target.elements.length);
+
+      // 有元素的行 → drop-invalid 且不替换
+      var dataTransfer2 = new w.DataTransfer();
+      dataTransfer2.setData(w.SignInteract.MIME_PRESET, JSON.stringify({ kind: 'preset', id: P.list()[0].id }));
+      var band0 = $('.row-band[data-row-index="0"]');
+      var b0 = band0.getBoundingClientRect();
+      wrap.dispatchEvent(new w.DragEvent('dragover', { dataTransfer: dataTransfer2, clientX: b0.left + 100, clientY: b0.top + b0.height / 2, bubbles: true, cancelable: true }));
+      ok('S07 非空行显示禁止放置', band0.classList.contains('drop-invalid'));
+      var row0Before = w.App.state.rows[0].elements.map(function (e) { return e.id; });
+      wrap.dispatchEvent(new w.DragEvent('drop', { dataTransfer: dataTransfer2, clientX: b0.left + 100, clientY: b0.top + b0.height / 2, bubbles: true, cancelable: true }));
+      ok('S07 非空行释放无效', w.App.state.rows[0].elements.map(function (e) { return e.id; }).join() === row0Before.join());
+      localStorage.removeItem('sign-presets');
+    }
+
+    function s08_paletteDropNewElement() {
+      var w = W();
+      var dataTransfer = new w.DataTransfer();
+      dataTransfer.setData(w.SignInteract.MIME_NEW, JSON.stringify({ kind: 'new', type: 'big-number' }));
+      var wrap = $('#canvas-wrap');
+      var band = $('.row-band[data-row-index="0"]');
+      var br = band.getBoundingClientRect();
+      wrap.dispatchEvent(new w.DragEvent('dragover', { dataTransfer: dataTransfer, clientX: br.left + 400, clientY: br.top + br.height / 2, bubbles: true, cancelable: true }));
+      wrap.dispatchEvent(new w.DragEvent('drop', { dataTransfer: dataTransfer, clientX: br.left + 400, clientY: br.top + br.height / 2, bubbles: true, cancelable: true }));
+      var row0 = w.App.state.rows[0];
+      ok('S08 拖放新元素到指定行', row0.elements[row0.elements.length - 1].type === 'big-number');
+      // 卡片点击 → 加到末行
+      var lastRowBefore = w.App.state.rows[w.App.state.rows.length - 1].elements.length;
+      $$('.palette-card').filter(function (c) { return c.textContent.indexOf('大数字') !== -1; })[0].click();
+      ok('S08 点击卡片添加到末行', w.App.state.rows[w.App.state.rows.length - 1].elements.length === lastRowBefore + 1);
+    }
+
+    function s09_settingsAndAspectLock() {
+      var w = W(), S = w.SignState;
+      // 固定宽度改窄
+      w.App.update(function (st) { return S.updateSignSettings(st, { width: 1600 }); });
+      ok('S09 固定宽度生效', w.App.layout.width === 1600);
+      // 锁定宽高比后改行高 → 宽度等比
+      w.App.update(function (st) { return S.updateSignSettings(st, { aspectLocked: true, rowHeight: 128 }); });
+      ok('S09 锁定比例：行高 256→128 宽度 1600→800', w.App.state.width === 800 && w.App.state.rowHeight === 128,
+        'w=' + w.App.state.width + ' h=' + w.App.state.rowHeight);
+      // 动态宽度
+      w.App.update(function (st) { return S.updateSignSettings(st, { widthMode: 'dynamic', aspectLocked: false, rowHeight: 200 }); });
+      var dynamicW = w.App.layout.width;
+      ok('S09 动态宽度 = 最宽行', dynamicW === Math.max.apply(null, w.App.state.rows.map(function (r) {
+        return w.SignRender.computeRowWidth(r, 200, w.App.measure);
+      }).concat([200])), 'w=' + dynamicW);
+      w.App.update(function (st) { return S.updateSignSettings(st, { widthMode: 'fixed', width: 2048 }); });
+    }
+
+    function s10_paddingEdit() {
+      var w = W(), S = w.SignState;
+      var el = w.App.state.rows[0].elements[0];
+      var before = w.SignRender.computeElementWidth(el, w.App.state.rowHeight, w.App.measure);
+      w.App.update(function (st) { return S.updateElementProps(st, el.id, { padding: { right: 0.4 } }); });
+      var after = w.SignRender.computeElementWidth(w.SignState.findElement(w.App.state, el.id).element, w.App.state.rowHeight, w.App.measure);
+      ok('S10 内边距修改 → 宽度增加', after > before, before + '→' + after);
+    }
+
+    async function s11_clearSign() {
+      var w = W();
+      // 触发 UI 按钮
+      var btns = $$('#right-panel-body .btn');
+      var clearBtn = btns.filter(function (b) { return b.textContent.indexOf('清空标识牌') !== -1; })[0];
+      w.App.select(null);
+      clearBtn = $$('#right-panel-body .btn').filter(function (b) { return b.textContent.indexOf('清空标识牌') !== -1; })[0];
+      clearBtn.click();
+      var modal = $('.modal-mask');
+      ok('S11 清空需确认', !!modal);
+      await modalAct('ok');
+      ok('S11 清空后恢复一行空白', w.App.state.rows.length === 1 && w.App.state.rows[0].elements.length === 0);
+      ok('S11 清空保留设置（宽度 2048）', w.App.state.width === 2048);
+    }
+
+    function s12_panelsCollapse() {
+      var w = W();
+      $('#left-collapse').click();
+      ok('S12 左栏收起', $('#left-panel').classList.contains('collapsed') && $('#left-expander').hidden === false);
+      $('#left-expander').click();
+      ok('S12 左栏展开', !$('#left-panel').classList.contains('collapsed') && $('#left-expander').hidden === true);
+      $('#right-collapse').click();
+      ok('S12 右栏收起', $('#right-panel').classList.contains('collapsed'));
+      $('#right-expander').click();
+      ok('S12 右栏展开', !$('#right-panel').classList.contains('collapsed'));
+    }
+
+    function s13_exporters() {
+      var w = W();
+      var s = w.App.state;
+      var str = w.SignExporters.buildExportSVGString(s, w.App.measure, {});
+      ok('S13 导出 SVG 是合法 XML', str.indexOf('<?xml') === 0 && new w.DOMParser().parseFromString(str, 'image/svg+xml').querySelector('parsererror') === null);
+      // 字体收集
+      w.App.update(function (st) {
+        var S = w.SignState;
+        st = S.addElement(st, st.rows[0].id, S.createElement('bilingual-text', { textZh: '站', textEn: 'St' }));
+        return st;
+      });
+      var used = w.SignExporters.collectUsedFonts(w.App.state);
+      ok('S13 字体按需收集（中文+英文+数字）', used.zh400 && used.en400, JSON.stringify(used));
+    }
+
+    function s14_jsonRoundtrip() {
+      var w = W();
+      var json = w.SignState.serializeSign(w.App.state);
+      var back = w.SignState.deserializeSign(json);
+      ok('S14 JSON 往返一致', JSON.stringify(back) === JSON.stringify(w.App.state));
+      var bad = false;
+      try { w.SignState.deserializeSign('{{{'); } catch (e) { bad = true; }
+      ok('S14 非法 JSON 抛错', bad);
+    }
+
+    async function s15_instanceGuard() {
+      var w = W();
+      // 伪造其他活跃实例
+      w.localStorage.setItem('sign-instance', JSON.stringify({ id: 'other', ts: Date.now() }));
+      w.SignStorage.setupInstanceGuard();
+      var masks = $$('.modal-mask');
+      var modal = masks[masks.length - 1];
+      ok('S15 检测到其他实例弹出警告', !!modal && modal.textContent.indexOf('已有运行中的编辑器实例') !== -1);
+      await modalAct('ok');
+      var inst = JSON.parse(w.localStorage.getItem('sign-instance'));
+      ok('S15 确认后接管实例标记', inst.id !== 'other');
+    }
+
+    async function s16_autosavePresent() {
+      var w = W();
+      // 自动保存防抖 500ms：等待落盘而非立即断言，消除快速机器上的竞态
+      var saved = await waitFor(function () { return !!w.localStorage.getItem('sign-autosave'); });
+      ok('S16 自动保存存档存在', saved);
+    }
+
+    // ─── 回归：属性面板编辑与对齐渲染 ─────────────────────
+
+    /** 面板里模拟键入：设值并派发 input + change 事件（数字输入框监听 change） */
+    function typeInto(input, value) {
+      input.focus();
+      input.value = value;
+      input.dispatchEvent(new (W().Event)('input', { bubbles: true }));
+      input.dispatchEvent(new (W().Event)('change', { bubbles: true }));
+    }
+
+    function s17_numberLineEditKeepsValue() {
+      var w = W(), S = w.SignState;
+      var el = S.createElement('number-line', {
+        lines: [{ number: '1', color: '#E3002B' }, { number: '2', color: '#82BF25' }],
+      });
+      w.App.update(function (st) { return S.addElement(st, st.rows[0].id, el); });
+      w.App.select(el.id);
+      var inputs = $$('#right-panel-body .lines-editor .le-number');
+      ok('S17 两条线路各有编号输入框', inputs.length === 2, 'n=' + inputs.length);
+      typeInto(inputs[0], '3');
+      var st = w.SignState.findElement(w.App.state, el.id).element;
+      ok('S17 输入 3 → 状态更新', st.props.lines[0].number === '3',
+        'lines=' + st.props.lines.map(function (l) { return l.number; }).join(','));
+      // 焦点切到另一处继续输入 → 之前的修改不得回跳到默认值
+      typeInto(inputs[1], '5');
+      st = w.SignState.findElement(w.App.state, el.id).element;
+      ok('S17 他处输入后原修改保持（状态）',
+        st.props.lines[0].number === '3' && st.props.lines[1].number === '5',
+        'lines=' + st.props.lines.map(function (l) { return l.number; }).join(','));
+      ok('S17 他处输入后原修改保持（显示）', inputs[0].value === '3', 'val=' + inputs[0].value);
+      // 输入命中上海线路表 → 自动预填线路色并同步到色板显示
+      var cp = $('#right-panel-body .line-entry .cp-current');
+      ok('S17 线路色自动匹配并同步显示', /rgb\(252,\s*214,\s*0\)/i.test(cp.style.background),
+        'bg=' + cp.style.background);
+      w.App.select(null);
+    }
+
+    function s18_bilingualPanelKeepsEdits() {
+      var w = W(), S = w.SignState;
+      var el = S.createElement('bilingual-text', { textZh: '站名', textEn: 'Station' });
+      w.App.update(function (st) { return S.addElement(st, st.rows[0].id, el); });
+      w.App.select(el.id);
+      var zh = $('#right-panel-body input[placeholder="中文文本"]');
+      var en = $('#right-panel-body input[placeholder="English text"]');
+      typeInto(zh, '人民广场');
+      typeInto(en, 'Peoples Square');
+      ok('S18 中文输入不因切换输入框回滚', zh.value === '人民广场', 'val=' + zh.value);
+      var st = w.SignState.findElement(w.App.state, el.id).element;
+      ok('S18 状态双语均更新', st.props.textZh === '人民广场' && st.props.textEn === 'Peoples Square');
+      // 对齐分段按钮应立即反映状态（无需刷新重建面板）
+      var btns = $$('#right-panel-body .seg-group button');
+      var rightBtn = btns.filter(function (b) { return b.textContent === '右对齐'; })[0];
+      var leftBtn = btns.filter(function (b) { return b.textContent === '左对齐'; })[0];
+      rightBtn.click();
+      ok('S18 右对齐按钮立即激活', rightBtn.classList.contains('active'));
+      ok('S18 左对齐按钮取消激活', !leftBtn.classList.contains('active'));
+      st = w.SignState.findElement(w.App.state, el.id).element;
+      ok('S18 状态 align=right', st.props.align === 'right', 'align=' + st.props.align);
+    }
+
+    function s19_bilingualAlignInsideBox() {
+      var w = W(), S = w.SignState;
+      // s18 留下的选中元素：人民广场 / Peoples Square，align=right
+      var sel = $('#sign-svg g.element.selected');
+      var elId = sel.getAttribute('data-element-id');
+      var el = S.findElement(w.App.state, elId).element;
+
+      function textEdges() {
+        sel = $('#sign-svg g.element.selected'); // 重渲染后节点重建，需重新查询
+        var box = sel.querySelector('.hitbox').getBoundingClientRect();
+        var minLeft = Infinity, maxRight = -Infinity;
+        $$('g.element.selected > text').forEach(function (t) {
+          var r = t.getBoundingClientRect();
+          minLeft = Math.min(minLeft, r.left);
+          maxRight = Math.max(maxRight, r.right);
+        });
+        return { box: box, minLeft: minLeft, maxRight: maxRight };
+      }
+
+      var e = textEdges();
+      ok('S19 右对齐文本不超出虚线框', e.maxRight <= e.box.right + 1,
+        '右缘超出 ' + (e.maxRight - e.box.right) + 'px');
+      var padR = el.props.padding.right * w.App.state.rowHeight;
+      ok('S19 右对齐文本贴内容右缘', e.maxRight >= e.box.right - padR - 2,
+        '距内容右缘 ' + (e.box.right - padR - e.maxRight) + 'px');
+
+      w.App.update(function (st) { return S.updateElementProps(st, elId, { align: 'center' }); });
+      e = textEdges();
+      ok('S19 居中不越界（右）', e.maxRight <= e.box.right + 1, '超出 ' + (e.maxRight - e.box.right) + 'px');
+      ok('S19 居中不越界（左）', e.minLeft >= e.box.left - 1, '左缘差 ' + (e.box.left - e.minLeft) + 'px');
+      w.App.select(null);
+    }
+
+    // ─── 回归：设置面板回显 / 内边距上限 / 元素对齐 ─────────
+
+    function s20_widthModeEchoAndPadding() {
+      var w = W(), S = w.SignState;
+      // 宽度模式切换立即回显（回归：签名含 widthMode 导致重建后无选中）
+      var btns = $$('#right-panel-body .seg-group button');
+      var fixedBtn = btns.filter(function (b) { return b.textContent === '固定'; })[0];
+      var dynamicBtn = btns.filter(function (b) { return b.textContent === '动态'; })[0];
+      ok('S20 初始固定高亮', fixedBtn.classList.contains('active'));
+      dynamicBtn.click();
+      ok('S20 切动态立即回显', dynamicBtn.classList.contains('active') && !fixedBtn.classList.contains('active'),
+        'fixed=' + fixedBtn.classList.contains('active') + ' dynamic=' + dynamicBtn.classList.contains('active'));
+      fixedBtn.click();
+      ok('S20 切回固定立即回显', fixedBtn.classList.contains('active') && !dynamicBtn.classList.contains('active'));
+      // 左右内边距可 >1，上下仍 ≤1
+      var el = S.createElement('big-number', { text: '4' });
+      w.App.update(function (st) { return S.addElement(st, st.rows[0].id, el); });
+      w.App.select(el.id);
+      typeInto($('#right-panel-body input[title="左内边距"]'), '1.5');
+      var st = w.SignState.findElement(w.App.state, el.id).element;
+      ok('S20 左内边距可 >1', st.props.padding.left === 1.5, 'left=' + st.props.padding.left);
+      typeInto($('#right-panel-body input[title="上内边距"]'), '1.5');
+      st = w.SignState.findElement(w.App.state, el.id).element;
+      ok('S20 上内边距仍 ≤1', st.props.padding.top === 1, 'top=' + st.props.padding.top);
+      w.App.select(null);
+    }
+
+    function s21_elementAlignLanes() {
+      var w = W(), S = w.SignState;
+      w.App.update(function (st) {
+        st = S.updateSignSettings(st, { width: 1000, rowHeight: 100 });
+        st = S.clearSign(st);
+        var r = st.rows[0].id;
+        st = S.addElement(st, r, S.createElement('space', { widthRatio: 0.2 }));  // 20 贴左
+        st = S.addElement(st, r, S.createElement('space', { widthRatio: 0.3, elementAlign: 'center' })); // 30
+        st = S.addElement(st, r, S.createElement('space', { widthRatio: 0.1, elementAlign: 'right' }));  // 10
+        return st;
+      });
+      var slots = w.App.layout.rows[0].elements;
+      ok('S21 左对齐贴左', slots[0].x === 0, 'x=' + slots[0].x);
+      ok('S21 居中成组', Math.abs(slots[1].x - (1000 - 30) / 2) < 0.5, 'x=' + slots[1].x);
+      ok('S21 贴右贴右缘', Math.abs(slots[2].x - (1000 - 10)) < 0.5, 'x=' + slots[2].x);
+      // 面板出现元素对齐控件且可切换
+      var g = $('#sign-svg g.element');
+      var r0 = g.getBoundingClientRect();
+      mouse('click', g.querySelector('.hitbox'), r0.left + 10, r0.top + 10);
+      var alignBtns = $$('#right-panel-body .seg-group button').filter(function (b) {
+        return ['贴左', '居中', '贴右'].indexOf(b.textContent) !== -1;
+      });
+      ok('S21 固定宽度显示元素对齐', alignBtns.length === 3, 'n=' + alignBtns.length +
+        ' widthMode=' + w.App.state.widthMode + ' sel=' + !!w.App.selection.elementId +
+        ' panel=' + $('#right-panel-title').textContent +
+        ' btns=' + $$('#right-panel-body .seg-group button').map(function (b) { return b.textContent; }).join(','));
+      alignBtns.filter(function (b) { return b.textContent === '贴右'; })[0].click();
+      var st = w.SignState.findElement(w.App.state, w.App.state.rows[0].elements[0].id).element;
+      ok('S21 元素对齐贴右生效', st.props.elementAlign === 'right');
+      w.App.select(null);
+      // 动态宽度：不显示元素对齐控件，布局整体左起
+      w.App.update(function (st2) { return S.updateSignSettings(st2, { widthMode: 'dynamic' }); });
+      var g2 = $('#sign-svg g.element');
+      var r1 = g2.getBoundingClientRect();
+      mouse('click', g2.querySelector('.hitbox'), r1.left + 10, r1.top + 10);
+      var alignBtns2 = $$('#right-panel-body .seg-group button').filter(function (b) {
+        return ['贴左', '居中', '贴右'].indexOf(b.textContent) !== -1;
+      });
+      ok('S21 动态宽度不显示元素对齐', alignBtns2.length === 0, 'n=' + alignBtns2.length);
+      ok('S21 动态宽度布局左起', w.App.layout.rows[0].elements[1].x === 20);
+      w.App.select(null);
+      // 还原固定模式供后续场景使用
+      w.App.update(function (st2) { return S.updateSignSettings(st2, { widthMode: 'fixed' }); });
+    }
+
+    function s22_arrowDiagonals() {
+      var w = W(), S = w.SignState;
+      var el = S.createElement('arrow', { direction: 'left-up' });
+      w.App.update(function (st) { return S.addElement(st, st.rows[0].id, el); });
+      // 面板八向按钮
+      w.App.select(el.id);
+      var dirBtns = $$('#right-panel-body .seg-group button').filter(function (b) {
+        return ['←', '↖', '↑', '↗', '→', '↘', '↓', '↙'].indexOf(b.textContent) !== -1;
+      });
+      ok('S22 方向面板八向', dirBtns.length === 8, 'n=' + dirBtns.length);
+      var se = $$('g.element.selected polygon');
+      ok('S22 斜向箭头渲染 3 个 polygon', se.length === 3, 'n=' + se.length);
+      dirBtns.filter(function (b) { return b.textContent === '↘'; })[0].click();
+      var st = w.SignState.findElement(w.App.state, el.id).element;
+      ok('S22 切换右下方向生效', st.props.direction === 'right-down');
+      w.App.select(null);
+    }
+
+    function s23_iconElement() {
+      var w = W();
+      // 左栏「方向指示」含 12 种方向图标卡片
+      var dirCards = $$('.palette-card .card-name').filter(function (n) {
+        return ['向上', '前方向左', '左行向后'].indexOf(n.textContent) !== -1;
+      });
+      ok('S23 方向图标卡片在左栏', dirCards.length === 3, 'n=' + dirCards.length);
+      // 「服务图标」卡片 → 添加图标元素
+      $$('.palette-card').filter(function (c) { return c.textContent.indexOf('图标') !== -1 && c.textContent.indexOf('方向') === -1; })[0].click();
+      var row0 = w.App.state.rows[0];
+      var last = row0.elements[row0.elements.length - 1];
+      ok('S23 图标元素已添加', last.type === 'icon');
+      w.App.select(last.id);
+      var iconBtns = $$('#right-panel-body .icon-pick');
+      ok('S23 图标选择器仅列服务设施', iconBtns.length === 17, 'n=' + iconBtns.length);
+      var active = iconBtns.filter(function (b) { return b.classList.contains('active'); });
+      ok('S23 当前图标高亮', active.length === 1, 'n=' + active.length);
+      var stairsBtn = iconBtns.filter(function (b) { return b.title === '楼梯'; })[0];
+      stairsBtn.click();
+      var st = w.SignState.findElement(w.App.state, last.id).element;
+      ok('S23 切换图标生效', st.props.icon === 'stairs');
+      var svg = $('#sign-svg g.element.selected svg');
+      ok('S23 画布渲染嵌套图标 svg', !!svg);
+      // 添加一个方向图标元素并改向
+      $$('.palette-card .card-name').filter(function (n) { return n.textContent === '前方向左'; })[0]
+        .parentNode.click();
+      var dirEl = w.App.state.rows[0].elements[w.App.state.rows[0].elements.length - 1];
+      ok('S23 方向图标元素为 icon 类型', dirEl.type === 'icon' && dirEl.props.icon === 'arrow_ahead_left',
+        dirEl.props.icon);
+      // 方向图标元素的选择器显示 12 向箭头（而非服务设施）
+      w.App.select(dirEl.id);
+      var dirBtns = $$('#right-panel-body .icon-pick');
+      ok('S23 方向图标选择器显示 12 向', dirBtns.length === 12, 'n=' + dirBtns.length);
+      w.App.select(null);
+    }
+
+    function s24_textLineNameSink() {
+      var w = W(), S = w.SignState;
+      var el = S.createElement('text-line', { text: '机场联络线', textEn: 'Airport Link Line' });
+      w.App.update(function (st) { return S.addElement(st, st.rows[0].id, el); });
+      w.App.select(el.id);
+      function texts() {
+        return $('#sign-svg g.element[data-element-id="' + el.id + '"]').querySelectorAll('text');
+      }
+      var cb = $$('#right-panel-body input[type="checkbox"]')[0];
+      ok('S24 下沉复选框默认勾选', !!cb && cb.checked);
+      ok('S24 下沉渲染含「线」后缀', texts().length === 3, 'n=' + texts().length);
+      cb.click();
+      var st = S.findElement(w.App.state, el.id).element;
+      ok('S24 关闭后状态 nameSink=false', st.props.nameSink === false);
+      ok('S24 关闭后复选框回显未勾选', !cb.checked);
+      var flat = texts();
+      ok('S24 平铺渲染无「线」后缀',
+        flat.length === 2 && flat[0].textContent === '机场联络线' && flat[1].textContent === 'Airport Link Line',
+        'n=' + flat.length);
+      cb.click();
+      st = S.findElement(w.App.state, el.id).element;
+      ok('S24 重新勾选恢复大字渲染',
+        st.props.nameSink === true && texts().length === 3, 'n=' + texts().length);
+      w.App.select(null);
+    }
+
+    function s25_paletteCityAndAutoColor() {
+      var w = W(), S = w.SignState;
+      function autoChecked() {
+        var f = $$('#right-panel-body .field-inline').filter(function (f) {
+          return f.textContent.indexOf('自动匹配线路色') !== -1;
+        })[0];
+        return f ? f.querySelector('input') : null;
+      }
+      function setCity(v) {
+        var sel = $('#right-panel-body .cp-city-select');
+        sel.value = v;
+        sel.dispatchEvent(new (W().Event)('change', { bubbles: true }));
+      }
+      // ─ 设置面板：编辑器节出现自动配色开关（默认开）
+      w.App.select(null);
+      var autoCb = autoChecked();
+      ok('S25 设置面板有自动配色开关且默认开启', !!autoCb && autoCb.checked);
+
+      // ─ 数字线路：输入命中当前城市（初始上海）线路色
+      var el = S.createElement('number-line', { lines: [{ number: '', color: '#424A52' }] });
+      w.App.update(function (st) { return S.addElement(st, st.rows[0].id, el); });
+      w.App.select(el.id);
+      function typeLineNo(v) {
+        typeInto($$('#right-panel-body .lines-editor .le-number')[0], v);
+      }
+      typeLineNo('3');
+      var st = S.findElement(w.App.state, el.id).element;
+      ok('S25 输入 3 自动命中上海线路色', st.props.lines[0].color === '#FCD600',
+        'color=' + st.props.lines[0].color);
+
+      // ─ 选色板城市下拉切换（元素面板内任一选择器），自动配色跟随城市
+      setCity('chongqing');
+      var pickers = $$('#right-panel-body .color-picker');
+      ok('S25 切重庆后面板全部选色板同步重建',
+        pickers.length > 0 && pickers.every(function (p) {
+          return p.querySelectorAll('.cp-swatch').length === 29;
+        }),
+        'n=' + pickers.map(function (p) { return p.querySelectorAll('.cp-swatch').length; }).join(','));
+      ok('S25 重庆色板含合并的潘通2935C蓝',
+        $$('#right-panel-body .cp-swatch').some(function (b) { return b.title === '潘通2935C蓝'; }));
+      ok('S25 其他选择器下拉回显同步', $$('#right-panel-body .cp-city-select')
+        .every(function (s) { return s.value === 'chongqing'; }));
+      typeLineNo('10');
+      st = S.findElement(w.App.state, el.id).element;
+      ok('S25 输入 10 自动命中重庆线路色（潘通2935C 前的 5F249F）',
+        st.props.lines[0].color === '#5F249F', 'color=' + st.props.lines[0].color);
+
+      // ─ 关闭开关：只改号不改色
+      w.App.select(null);
+      autoCb = autoChecked();
+      autoCb.click();
+      w.App.select(el.id);
+      typeLineNo('2');
+      st = S.findElement(w.App.state, el.id).element;
+      ok('S25 关闭开关后输入 2 颜色保持不变',
+        st.props.lines[0].number === '2' && st.props.lines[0].color === '#5F249F',
+        'color=' + st.props.lines[0].color);
+
+      // ─ 恢复默认偏好，避免污染同源存储的编辑器
+      w.App.select(null);
+      autoCb = autoChecked();
+      autoCb.click();
+      setCity('shanghai');
+      ok('S25 偏好恢复默认（开关开 + 上海）',
+        w.App.prefs.autoLineColor === true && w.App.prefs.paletteCity === 'shanghai');
+      w.App.select(null);
+    }
+
+    function s26_contentAlignRight() {
+      var w = W(), S = w.SignState;
+      // 数字线路：默认左对齐 → 右对齐后色块换边、仅渲染第 1 条线路
+      var el = S.createElement('number-line', {
+        lines: [{ number: '4', color: '#E3002B' }, { number: '9', color: '#FCD600' }],
+      });
+      w.App.update(function (st) { return S.addElement(st, st.rows[0].id, el); });
+      w.App.select(el.id);
+      function elNode(id) {
+        return $('#sign-svg g.element[data-element-id="' + id + '"]');
+      }
+      function stripeX(id) {
+        return parseFloat(elNode(id).querySelector('rect').getAttribute('x'));
+      }
+      function digitX(id) {
+        return parseFloat(elNode(id).querySelector('text').getAttribute('x'));
+      }
+      var btns = $$('#right-panel-body .seg-group button').filter(function (b) {
+        return b.textContent === '左对齐' || b.textContent === '右对齐'; // 区别于「元素对齐」分段组
+      });
+      ok('S26 对齐分段按钮出现（左/右）', btns.length === 2, 'n=' + btns.length);
+      ok('S26 默认左对齐：色条在编号左侧', stripeX(el.id) < digitX(el.id));
+      btns.filter(function (b) { return b.textContent === '右对齐'; })[0].click();
+      var st = S.findElement(w.App.state, el.id).element;
+      ok('S26 状态 align=right', st.props.align === 'right');
+      ok('S26 右对齐色条移到编号右侧', stripeX(el.id) > digitX(el.id));
+      ok('S26 右对齐仅渲染第 1 条线路',
+        elNode(el.id).querySelectorAll('text').length === 3,
+        'n=' + elNode(el.id).querySelectorAll('text').length);
+      ok('S26 右对齐时添加线路按钮禁用',
+        $$('#right-panel-body .le-add').every(function (b) { return b.disabled; }));
+      // 切回左对齐：两条线路恢复渲染
+      $$('#right-panel-body .seg-group button').filter(function (b) { return b.textContent === '左对齐'; })[0].click();
+      st = S.findElement(w.App.state, el.id).element;
+      ok('S26 切回左对齐恢复两条线路渲染',
+        st.props.align === 'left' && elNode(el.id).querySelectorAll('text').length === 4,
+        'n=' + elNode(el.id).querySelectorAll('text').length);
+
+      // 出口：编号移至「出口」右侧
+      var ex = S.createElement('exit', { code: '1' });
+      w.App.update(function (st2) { return S.addElement(st2, st2.rows[0].id, ex); });
+      w.App.select(ex.id);
+      var exBtns = $$('#right-panel-body .seg-group button').filter(function (b) {
+        return b.textContent === '左对齐' || b.textContent === '右对齐';
+      });
+      ok('S26 出口面板有对齐选项', exBtns.length === 2, 'n=' + exBtns.length);
+      exBtns.filter(function (b) { return b.textContent === '右对齐'; })[0].click();
+      st = S.findElement(w.App.state, ex.id).element;
+      ok('S26 出口 align=right', st.props.align === 'right');
+      var exTexts = elNode(ex.id).querySelectorAll('text');
+      ok('S26 出口编号移到「出口」右侧',
+        parseFloat(exTexts[0].getAttribute('x')) > parseFloat(exTexts[1].getAttribute('x')));
+      w.App.select(null);
+    }
+
+    function s27_rightLaneDrag() {
+      var w = W(), S = w.SignState;
+      // 固定宽度 + 两个贴右空白：数组 [A, B] → 视觉序相反（B 在 A 左侧）
+      w.App.update(function (st) {
+        st = S.updateSignSettings(st, { width: 1000 });
+        st = S.clearSign(st);
+        var a = S.createElement('space', { widthRatio: 0.3, elementAlign: 'right' });
+        var b = S.createElement('space', { widthRatio: 0.3, elementAlign: 'right' });
+        st = S.addElement(st, st.rows[0].id, a);
+        st = S.addElement(st, st.rows[0].id, b);
+        return st;
+      });
+      var row = w.App.state.rows[0];
+      var A = row.elements[0].id, B = row.elements[1].id;
+      ok('S27 贴右通道视觉序与数组序相反',
+        w.App.layout.rows[0].elements[0].x > w.App.layout.rows[0].elements[1].x);
+      // 落点计算：指针在牌面最右端 → 数组间隙 0（旧逻辑误算为 2）
+      ok('S27 最右端落点数组间隙为 0',
+        w.SignInteract.gapIndexAt(0, w.App.layout.width - 4, 'right') === 0,
+        'gap=' + w.SignInteract.gapIndexAt(0, w.App.layout.width - 4, 'right'));
+      ok('S27 最左端落点数组间隙为元素数',
+        w.SignInteract.gapIndexAt(0, 4, 'right') === 2,
+        'gap=' + w.SignInteract.gapIndexAt(0, 4, 'right'));
+      // 真实拖拽：把 B（视觉居左）拖到牌面最右 → 数组序翻转为 [B, A]
+      var gB = $('g.element[data-element-id="' + B + '"]');
+      var svgRect = $('#sign-svg').getBoundingClientRect();
+      drag(gB, { x: svgRect.right - 6, y: svgRect.top + svgRect.height * 0.5 });
+      var arr = w.App.state.rows[0].elements.map(function (e) { return e.id; });
+      ok('S27 拖 B 到最右 → 数组翻转为 [B, A]', arr[0] === B && arr[1] === A, arr.join(','));
+      // 视觉翻转：A 的 x 移到 B 左侧（贴右通道数组序恒为从右到左，需按元素比 x）
+      var slotsNow = w.App.layout.rows[0].elements;
+      var ax = slotsNow.filter(function (s) { return s.id === A; })[0].x;
+      var bx = slotsNow.filter(function (s) { return s.id === B; })[0].x;
+      ok('S27 视觉序随之翻转（A 移到 B 左侧）', ax < bx, 'ax=' + ax + ' bx=' + bx);
+      // 拖回：把 B（视觉最右）拖到牌面最左 → 恢复 [A, B]
+      var gB2 = $('g.element[data-element-id="' + B + '"]');
+      drag(gB2, { x: svgRect.left + 6, y: svgRect.top + svgRect.height * 0.5 });
+      var arr2 = w.App.state.rows[0].elements.map(function (e) { return e.id; });
+      ok('S27 拖 B 到最左 → 恢复数组 [A, B]', arr2[0] === A && arr2[1] === B, arr2.join(','));
+      w.App.select(null);
+    }
+
+    function s28_centerLaneDrag() {
+      var w = W(), S = w.SignState;
+      // 固定宽度 + 混合通道：数组 [C1(中), L(左), C2(中)]，中通道视觉序 = 数组序
+      w.App.update(function (st) {
+        st = S.updateSignSettings(st, { width: 1000 });
+        st = S.clearSign(st);
+        var c1 = S.createElement('space', { widthRatio: 0.3, elementAlign: 'center' });
+        var l = S.createElement('space', { widthRatio: 0.3, elementAlign: 'left' });
+        var c2 = S.createElement('space', { widthRatio: 0.3, elementAlign: 'center' });
+        st = S.addElement(st, st.rows[0].id, c1);
+        st = S.addElement(st, st.rows[0].id, l);
+        st = S.addElement(st, st.rows[0].id, c2);
+        return st;
+      });
+      var row = w.App.state.rows[0];
+      var C1 = row.elements[0].id, L = row.elements[1].id, C2 = row.elements[2].id;
+      function slotOf(id) {
+        return w.App.layout.rows[0].elements.filter(function (s) { return s.id === id; })[0];
+      }
+      ok('S28 中通道数组序 = 视觉序（C1 在 C2 左侧）', slotOf(C1).x < slotOf(C2).x);
+      // 旧逻辑回归点：指针在 L 与 C1 之间时，左通道元素不参与中通道计数，
+      // 间隙应为 C1 之前（旧代码把 L 计入 → 误为 L 之前，导致落点跑到 C1 右侧）
+      var lx = slotOf(L).x + slotOf(L).width / 2 + 12;
+      var gap = w.SignInteract.gapIndexAt(0, lx, 'center');
+      ok('S28 指针在 L|C1 之间 → 中通道数组间隙为 0', gap === 0, 'gap=' + gap);
+      // 真实拖拽：把 C1 拖到 C2 右侧
+      var gC1 = $('g.element[data-element-id="' + C1 + '"]');
+      var svgRect = $('#sign-svg').getBoundingClientRect();
+      var toSignX = slotOf(C2).x + slotOf(C2).width + 20;
+      drag(gC1, { x: svgRect.left + toSignX / w.App.layout.width * svgRect.width,
+                  y: svgRect.top + svgRect.height * 0.3 });
+      var arr = w.App.state.rows[0].elements.map(function (e) { return e.id; });
+      ok('S28 拖 C1 到 C2 右侧 → 数组变为 [L, C2, C1]',
+        arr[0] === L && arr[1] === C2 && arr[2] === C1, arr.join(','));
+      ok('S28 中通道视觉序翻转（C1 在 C2 右侧）', slotOf(C1).x > slotOf(C2).x);
+      w.App.select(null);
+    }
+
+    async function s29_deleteKeyAndEmptyRow() {
+      var w = W(), S = w.SignState;
+      // ─ Del 键删除选中元素
+      var el = S.createElement('big-number', { text: '7' });
+      w.App.update(function (st) { return S.addElement(st, st.rows[0].id, el); });
+      w.App.select(el.id);
+      var before = w.App.state.rows[0].elements.length;
+      w.document.dispatchEvent(new (w.KeyboardEvent)('keydown', { key: 'Delete', bubbles: true }));
+      ok('S29 Del 键删除选中元素',
+        !S.findElement(w.App.state, el.id) && w.App.state.rows[0].elements.length === before - 1);
+      ok('S29 删除后取消选中并回到设置面板',
+        w.App.selection.elementId === null && $('#right-panel-title').textContent === '标识牌设置');
+      // ─ 焦点在输入框内时 Del 不删除元素（正常编辑文本）
+      var el2 = S.createElement('big-number', { text: '8' });
+      w.App.update(function (st) { return S.addElement(st, st.rows[0].id, el2); });
+      w.App.select(el2.id);
+      var input = $('#right-panel-body input');
+      input.focus();
+      input.dispatchEvent(new (w.KeyboardEvent)('keydown', { key: 'Delete', bubbles: true }));
+      ok('S29 焦点在输入框内时 Del 不删除元素', !!S.findElement(w.App.state, el2.id));
+      w.App.select(null);
+      // ─ 空行直接删除，无确认弹窗
+      w.document.getElementById('add-row-btn').click();
+      var rowsBefore = w.App.state.rows.length;
+      var delBtns = $$('.row-del');
+      delBtns[delBtns.length - 1].click();
+      ok('S29 空行直接删除（无确认弹窗）',
+        w.App.state.rows.length === rowsBefore - 1 && $$('.modal-mask').length === 0,
+        'rows=' + w.App.state.rows.length + ' masks=' + $$('.modal-mask').length);
+      // ─ 含元素的行仍弹确认：新行放入元素后再删
+      w.document.getElementById('add-row-btn').click();
+      w.App.update(function (st) {
+        var rid = st.rows[st.rows.length - 1].id;
+        return S.addElement(st, rid, S.createElement('big-number', { text: '9' }));
+      });
+      var delBtns2 = $$('.row-del');
+      delBtns2[delBtns2.length - 1].click();
+      var hasModal = $$('.modal-mask').length > 0;
+      ok('S29 含元素行仍弹确认对话框', hasModal);
+      if (hasModal) await modalAct('cancel');
+    }
+
+    function s30_signFrame() {
+      var w = W();
+      w.App.select(null);
+      var inp = $('#right-panel-body .frame-width-input');
+      ok('S30 设置面板有灰框宽度输入（默认 0）', !!inp && inp.value === '0');
+      var rows = w.App.state.rows.length;
+      typeInto(inp, '12');
+      ok('S30 状态 frameWidth=12', w.App.state.frameWidth === 12);
+      ok('S30 灰框渲染：每行 4 矩形',
+        $$('#sign-svg .sign-frame').length === rows * 4,
+        'n=' + $$('#sign-svg .sign-frame').length + ' rows=' + rows);
+      var str = w.SignExporters.buildExportSVGString(w.App.state, w.App.measure, {});
+      ok('S30 导出 SVG 含灰框', str.indexOf('sign-frame') !== -1);
+      typeInto(inp, '0');
+      ok('S30 宽度 0 → 灰框消失', $$('#sign-svg .sign-frame').length === 0);
+    }
+
+    // ─── 主流程 ───────────────────────────────────────────
+
+    var frameEl = document.getElementById('app-frame');
+    function start() {
+      runWhenReady(async function () {
+        setupScenario();
+        s01_selectAndPanel();
+        s02_elementDragReorder();
+        s03_crossRowDrag();
+        s04_rowHandleDrag();
+        await s05_deleteRowWithConfirm();
+        await s06_savePresetFlow();
+        s07_presetPreviewAndDrop();
+        s08_paletteDropNewElement();
+        s09_settingsAndAspectLock();
+        s10_paddingEdit();
+        await s11_clearSign();
+        s12_panelsCollapse();
+        s13_exporters();
+        s14_jsonRoundtrip();
+        await s15_instanceGuard();
+        await s16_autosavePresent();
+        s17_numberLineEditKeepsValue();
+        s18_bilingualPanelKeepsEdits();
+        s19_bilingualAlignInsideBox();
+        s20_widthModeEchoAndPadding();
+        s21_elementAlignLanes();
+        s22_arrowDiagonals();
+        s23_iconElement();
+        s24_textLineNameSink();
+        s25_paletteCityAndAutoColor();
+        s26_contentAlignRight();
+        s27_rightLaneDrag();
+        s28_centerLaneDrag();
+        await s29_deleteKeyAndEmptyRow();
+        s30_signFrame();
+      }).then(function () {
+        var passed = results.filter(function (r) { return r.pass; }).length;
+        var total = results.length;
+        var failed = total - passed;
+        var s = document.getElementById('summary');
+        s.textContent = '结果：' + passed + ' 通过 / ' + failed + ' 失败';
+        s.style.color = failed ? '#f87171' : '#4ade80';
+        document.title = failed ? '✖ E2E 失败 (' + failed + ')' : '✔ E2E 全部通过';
+        window.__E2E_RESULTS__ = { passed: passed, failed: failed, results: results };
+        try { localStorage.setItem('e2e-results', JSON.stringify(window.__E2E_RESULTS__)); } catch (e) {}
+      }).catch(function (e) {
+        ok('执行异常', false, e.message + '\n' + e.stack);
+        document.title = '✖ E2E 异常';
+        window.__E2E_RESULTS__ = { error: String(e), results: results };
+        try { localStorage.setItem('e2e-results', JSON.stringify(window.__E2E_RESULTS__)); } catch (e2) {}
+      });
+    }
+    frameEl.onload = start;
+    if (frameEl.contentDocument && frameEl.contentDocument.readyState === 'complete') start();
+  </script>
+</body>
+</html>

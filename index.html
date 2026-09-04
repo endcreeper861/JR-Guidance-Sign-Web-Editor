@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>导向标识生成器</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- 字体加载指示 -->
+  <div id="loading-overlay" hidden>
+    <div class="loading-spinner"></div>
+    <div id="loading-text">正在加载字体…</div>
+  </div>
+
+  <div id="app">
+
+    <!-- ══ 左栏：元素选择区 ══ -->
+    <aside id="left-panel" class="side-panel">
+      <div class="panel-header">
+        <span class="panel-title">元素选择区</span>
+        <button class="icon-btn collapse-btn" id="left-collapse" title="收起元素选择区">⟨</button>
+      </div>
+      <div class="panel-body" id="palette">
+        <!-- panel.js 填充：分类元素卡片 + 预设 -->
+      </div>
+    </aside>
+    <button id="left-expander" class="expander" title="展开元素选择区" hidden>⟩</button>
+
+    <!-- ══ 中栏：SVG 编辑区 ══ -->
+    <main id="center-panel">
+      <div id="canvas-scroll">
+        <div id="canvas-area">
+          <div id="canvas-wrap">
+            <svg id="sign-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+            <div id="sign-overlay">
+              <!-- interact.js 填充：行手柄/行按钮/拖放指示器 -->
+            </div>
+            <div id="empty-hint" hidden>从左侧拖放元素到此处开始编辑</div>
+          </div>
+          <button id="add-row-btn" title="在底部添加新行">＋ 添加行</button>
+        </div>
+      </div>
+    </main>
+
+    <!-- ══ 右栏：属性 / 导出 ══ -->
+    <button id="right-expander" class="expander expander-right" title="展开属性面板" hidden>⟨</button>
+    <aside id="right-panel" class="side-panel">
+      <div class="panel-header">
+        <span class="panel-title" id="right-panel-title">标识牌设置</span>
+        <span style="display:flex;gap:2px">
+          <button class="icon-btn" id="close-element-btn" title="关闭元素属性" hidden>✕</button>
+          <button class="icon-btn collapse-btn" id="right-collapse" title="收起属性面板">⟩</button>
+        </span>
+      </div>
+      <div class="panel-body" id="right-panel-body">
+        <!-- panel.js 填充：标识牌设置 / 元素属性 / 预设预览 -->
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- 通知与对话框 -->
+  <div id="toasts"></div>
+  <div id="modal-root"></div>
+
+  <script src="js/core.js"></script>
+  <script src="js/icons.js"></script>
+  <script src="js/state.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/presets.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/exporters.js"></script>
+  <script src="js/panel.js"></script>
+  <script src="js/interact.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
