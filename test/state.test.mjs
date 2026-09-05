@@ -151,6 +151,9 @@ test('createElement 各类型默认值齐全，padding 深合并', () => {
   const sp = S.createElement('space');
   assert.equal(sp.props.widthRatio, 0.5);
   assert.equal(sp.props.backgroundColor, null); // 空白占位默认透明，可选背景色
+  assert.equal(sp.props.paddingAuto, false);    // 空白占位不参与相邻自动内边距
+  const bn = S.createElement('big-number');
+  assert.equal(bn.props.paddingAuto, true);     // 其余类型默认开启相邻自动内边距
 });
 
 test('createElement 生成唯一 id', () => {
@@ -557,4 +560,102 @@ test('findElement 全牌搜索', () => {
   assert.equal(found.index, 0);
   assert.equal(found.element.type, 'entrance');
   assert.equal(S.findElement(s, 'nope'), null);
+});
+
+// ─── 相邻自动内边距 ───────────────────────────────────────
+
+test('paddingAuto：deserialize 仅显式 true 保留，缺省钉住（旧存档不被动改）', () => {
+  const on = S.deserializeSign({
+    sign: { rows: [{ id: 'r', elements: [{ id: 'e', type: 'big-number', props: { paddingAuto: true } }] }] },
+  });
+  assert.equal(on.rows[0].elements[0].props.paddingAuto, true);
+  const legacy = S.deserializeSign({
+    sign: { rows: [{ id: 'r', elements: [{ id: 'e', type: 'big-number' }] }] },
+  });
+  assert.equal(legacy.rows[0].elements[0].props.paddingAuto, false);
+  const junk = S.deserializeSign({
+    sign: { rows: [{ id: 'r', elements: [{ id: 'e', type: 'big-number', props: { paddingAuto: 'yes' } }] }] },
+  });
+  assert.equal(junk.rows[0].elements[0].props.paddingAuto, false);
+});
+
+test('applyPaddingAuto：相邻折减、外侧保持、space 不算邻居', () => {
+  let sign = S.createSign();
+  sign = S.updateSignSettings(sign, { width: 1000 });
+  const A = S.createElement('big-number', { text: '1' });
+  const SP = S.createElement('space', { widthRatio: 0.3 });
+  const B = S.createElement('big-number', { text: '2' });
+  sign = S.addElement(sign, sign.rows[0].id, A);
+  sign = S.addElement(sign, sign.rows[0].id, SP);
+  sign = S.addElement(sign, sign.rows[0].id, B);
+  sign = S.applyPaddingAuto(sign);
+  const els = sign.rows[0].elements;
+  assert.equal(els[0].props.padding.right, 0.2);   // 右邻是 space → 不折减
+  assert.equal(els[2].props.padding.left, 0.2);    // 左邻是 space → 不折减
+  assert.equal(els[0].props.padding.left, 0.2);    // 外侧保持默认
+  assert.equal(els[2].props.padding.right, 0.2);
+});
+
+test('applyPaddingAuto：相邻折减两侧、外侧保持', () => {
+  let sign = S.createSign();
+  sign = S.updateSignSettings(sign, { width: 1000 });
+  const C = S.createElement('big-number', { text: '3' });
+  const D = S.createElement('bilingual-text', { textZh: '甲', textEn: 'A' });
+  sign = S.addElement(sign, sign.rows[0].id, C);
+  sign = S.addElement(sign, sign.rows[0].id, D);
+  sign = S.applyPaddingAuto(sign);
+  const els = sign.rows[0].elements;
+  assert.equal(els[0].props.padding.right, 0.1);
+  assert.equal(els[0].props.padding.left, 0.2);
+  assert.equal(els[1].props.padding.left, 0.1);
+  assert.equal(els[1].props.padding.right, 0.2);
+  // 删除邻居 → 自动侧恢复默认
+  sign = S.deleteElement(sign, D.id);
+  sign = S.applyPaddingAuto(sign);
+  assert.equal(sign.rows[0].elements[0].props.padding.right, 0.2);
+});
+
+test('applyPaddingAuto：贴右通道左右映射按视觉方向翻转', () => {
+  let sign = S.createSign();
+  sign = S.updateSignSettings(sign, { width: 1000 });
+  const RA = S.createElement('big-number', { text: '3', elementAlign: 'right' });
+  const RB = S.createElement('big-number', { text: '4', elementAlign: 'right' });
+  sign = S.addElement(sign, sign.rows[0].id, RA);
+  sign = S.addElement(sign, sign.rows[0].id, RB);
+  sign = S.applyPaddingAuto(sign);
+  const els = sign.rows[0].elements;
+  // 视觉 [RB][RA]：RA 的视觉左邻是 RB，右邻无；RB 相反
+  assert.equal(els[0].props.padding.left, 0.1);
+  assert.equal(els[0].props.padding.right, 0.2);
+  assert.equal(els[1].props.padding.right, 0.1);
+  assert.equal(els[1].props.padding.left, 0.2);
+});
+
+test('applyPaddingAuto：钉住元素不折减', () => {
+  let sign = S.createSign();
+  const A = S.createElement('big-number', {
+    text: '1', paddingAuto: false,
+    padding: { top: 0.2, right: 0.3, bottom: 0.2, left: 0.3 },
+  });
+  const B = S.createElement('big-number', { text: '2' });
+  sign = S.addElement(sign, sign.rows[0].id, A);
+  sign = S.addElement(sign, sign.rows[0].id, B);
+  sign = S.applyPaddingAuto(sign);
+  const els = sign.rows[0].elements;
+  assert.equal(els[0].props.padding.right, 0.3);   // 钉住不动
+  assert.equal(els[1].props.padding.left, 0.1);    // 邻居存在即折减（与邻居是否钉住无关）
+});
+
+test('updateElementProps：写入左右内边距即钉住（与面板编辑一致）', () => {
+  let s = S.createSign();
+  const el = S.createElement('big-number', { text: '1' });
+  s = S.addElement(s, s.rows[0].id, el);
+  s = S.updateElementProps(s, el.id, { padding: { left: 0.3 } });
+  assert.equal(s.rows[0].elements[0].props.paddingAuto, false);
+  assert.equal(s.rows[0].elements[0].props.padding.left, 0.3);
+  // 仅写上下不钉住
+  const el2 = S.createElement('big-number', { text: '2' });
+  s = S.addElement(s, s.rows[0].id, el2);
+  s = S.updateElementProps(s, el2.id, { padding: { top: 0.4 } });
+  assert.equal(s.rows[0].elements[1].props.paddingAuto, true);
 });

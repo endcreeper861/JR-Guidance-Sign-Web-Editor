@@ -110,6 +110,8 @@
 
   function createElement(type, props) {
     var base = Core.deepClone(DEFAULT_PROPS[type] || {});
+    // 新建元素默认开启相邻自动内边距（space 除外：其宽度即显式间距）
+    base.paddingAuto = type !== 'space';
     if (props) {
       if (props.padding) {
         base.padding = Object.assign({}, base.padding, props.padding);
@@ -227,7 +229,9 @@
     return Object.assign({}, sign, { rows: rows });
   }
 
-  /** 更新元素属性（浅合并 patch；padding 单独深合并一层） */
+  /** 更新元素属性（浅合并 patch；padding 单独深合并一层）。
+   *  写入左右内边距视为手动编辑 → 钉住（paddingAuto=false），
+   *  自动重算走 applyPaddingAuto，不经过此函数。 */
   function updateElementProps(sign, elementId, patch) {
     var rows = sign.rows.map(function (row) {
       var hit = row.elements.some(function (e) { return e.id === elementId; });
@@ -238,6 +242,9 @@
           var props = Object.assign({}, e.props, patch);
           if (patch.padding) {
             props.padding = Object.assign({}, e.props.padding, patch.padding);
+            if (patch.padding.left !== undefined || patch.padding.right !== undefined) {
+              props.paddingAuto = false;
+            }
           }
           return Object.assign({}, e, { props: props });
         }),
@@ -322,6 +329,58 @@
     return isFinite(n) ? Core.clamp(n, lo, hi) : fallback;
   }
 
+  // ─── 相邻自动内边距 ────────────────────────────────────────
+
+  var PADDING_AUTO_DEFAULT = 0.2;   // 自动侧无邻居时
+  var PADDING_AUTO_ADJACENT = 0.1;  // 自动侧有相邻元素时
+
+  function elementLane(el, fixed) {
+    if (!fixed) return 'left';
+    var a = el.props.elementAlign;
+    return a === 'right' ? 'right' : a === 'center' ? 'center' : 'left';
+  }
+
+  /**
+   * 相邻自动内边距（纯函数、幂等）：paddingAuto 元素的左/右侧在同行同通道
+   * 紧邻其他元素时折减为 0.1，无邻居时回到 0.2。空白占位不算邻居
+   * （其宽度是显式的间距表达）；贴右通道的数组序与视觉序相反，
+   * 按视觉方向映射到对应侧。手动钉住的元素（paddingAuto=false）不参与。
+   * 在 App.update 管线中每次变更后运行，随当次更新一并落盘/撤销。
+   */
+  function applyPaddingAuto(sign) {
+    var fixed = sign.widthMode === 'fixed';
+    var rows = sign.rows.map(function (row) {
+      var els = row.elements;
+      var touched = false;
+      var mapped = els.map(function (el, i) {
+        if (el.type === 'space' || !el.props.paddingAuto) return el;
+        var lane = elementLane(el, fixed);
+        function neighborAt(delta) {
+          var j = i + delta;
+          if (j < 0 || j >= els.length) return null;
+          var n = els[j];
+          if (n.type === 'space') return null;
+          return elementLane(n, fixed) === lane ? n : null;
+        }
+        var leftNeighbor = neighborAt(-1), rightNeighbor = neighborAt(1);
+        var hasLeft = lane === 'right' ? !!rightNeighbor : !!leftNeighbor;
+        var hasRight = lane === 'right' ? !!leftNeighbor : !!rightNeighbor;
+        var pl = hasLeft ? PADDING_AUTO_ADJACENT : PADDING_AUTO_DEFAULT;
+        var pr = hasRight ? PADDING_AUTO_ADJACENT : PADDING_AUTO_DEFAULT;
+        if (el.props.padding.left === pl && el.props.padding.right === pr) return el;
+        touched = true;
+        return Object.assign({}, el, {
+          props: Object.assign({}, el.props, {
+            padding: Object.assign({}, el.props.padding, { left: pl, right: pr }),
+          }),
+        });
+      });
+      if (!touched) return row;
+      return Object.assign({}, row, { elements: mapped });
+    });
+    return Object.assign({}, sign, { rows: rows });
+  }
+
   var ARROW_DIRECTIONS = [
     'up', 'down', 'left', 'right', 'left-up', 'right-up', 'right-down', 'left-down',
   ];
@@ -347,8 +406,12 @@
   function sanitizeElement(el) {
     if (!isPlainObject(el) || ELEMENT_TYPES.indexOf(el.type) === -1) return null;
     var defaults = DEFAULT_PROPS[el.type];
+    // paddingAuto 需在默认值合并前读取：仅显式 true 保留，
+    // 旧存档/未标记元素一律钉住（打开老标识牌不能被悄悄改内边距）
+    var savedAuto = isPlainObject(el.props) && el.props.paddingAuto === true;
     var props = Object.assign(Core.deepClone(defaults), isPlainObject(el.props) ? el.props : {});
     props.padding = sanitizePadding(props.padding);
+    props.paddingAuto = el.type === 'space' ? false : savedAuto;
     if (props.color !== undefined) props.color = sanitizeColor(props.color, '#000000');
     if (props.backgroundColor !== undefined && props.backgroundColor !== null) {
       props.backgroundColor = sanitizeColor(props.backgroundColor, null);
@@ -472,6 +535,9 @@
     updateSignSettings: updateSignSettings,
     findElement: findElement,
     clearSign: clearSign,
+    applyPaddingAuto: applyPaddingAuto,
+    PADDING_AUTO_ADJACENT: PADDING_AUTO_ADJACENT,
+    PADDING_AUTO_DEFAULT: PADDING_AUTO_DEFAULT,
     serializeSign: serializeSign,
     deserializeSign: deserializeSign,
   };

@@ -20,6 +20,10 @@
     /** 状态变更入口：pureFn(sign) → 新 sign */
     update: function (pureFn) {
       App.state = pureFn(App.state);
+      if (global.SignState && SignState.applyPaddingAuto) {
+        // 相邻自动内边距：每次变更后按相邻关系重算自动侧（幂等，随当次更新落盘/撤销）
+        App.state = SignState.applyPaddingAuto(App.state);
+      }
       App.renderAll();
       if (global.SignStorage) SignStorage.scheduleAutosave(App.state);
     },
@@ -39,15 +43,24 @@
     /**
      * 编辑区显示尺寸：适配画布宽度，但缩放不超过 100%——
      * 窄标识牌不放大（否则行高会被等比放大得过大），宽标识牌铺满画布。
+     * 覆盖层（指示线/行手柄的百分比基准）同步为 SVG 实际显示区，
+     * 否则窄牌右侧留白会使拖放指示线漂移。
      * canvas-wrap 尺寸变化（窗口缩放/面板收展）由 ResizeObserver 触发重算（main.js）。
      */
     fitSignDisplay: function () {
       if (!App.layout) return;
       var svg = document.getElementById('sign-svg');
       var wrap = document.getElementById('canvas-wrap');
+      var overlay = document.getElementById('sign-overlay');
       if (!svg || !wrap) return;
       var avail = wrap.clientWidth;
-      if (avail > 0) svg.style.width = Math.min(avail, App.layout.width) + 'px';
+      if (avail > 0) {
+        svg.style.width = Math.min(avail, App.layout.width) + 'px';
+        if (overlay) {
+          overlay.style.width = svg.style.width;
+          overlay.style.height = svg.getBoundingClientRect().height + 'px';
+        }
+      }
     },
 
     /** 选中元素（null = 取消选中，回到标识牌设置） */

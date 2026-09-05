@@ -662,7 +662,7 @@
       })));
     }
 
-    if (el.type !== 'space' && el.type !== 'exit') {
+    if (el.type !== 'exit') {
       root.appendChild(h('div', { class: 'divider' }));
       root.appendChild(buildBackgroundPicker(el));
     }
@@ -892,12 +892,7 @@
     w.value = el.props.widthRatio;
     bindSync(w, function () { return live().props.widthRatio; });
     root.appendChild(field('宽度（× 行高的倍数）', w));
-    root.appendChild(field('背景色', buildColorPicker({
-      value: el.props.backgroundColor,
-      nullable: true,
-      getValue: function () { return live().props.backgroundColor; },
-      onChange: function (v) { patchProps(el.id, { backgroundColor: v }); },
-    })));
+    // 背景色由通用分发器统一追加（buildElementPanel 末尾）
   }
 
   /**
@@ -948,18 +943,33 @@
   }
 
   function buildPaddingEditor(el, live) {
-    var grid = h('div', { style: 'display:grid;grid-template-columns:repeat(4,1fr);gap:6px' });
+    // 上下左右挤一行时输入框过窄（"0.25" 显示成 "0.2"）：
+    // 左右一行、上下一行，两行各两框
+    var wrap = h('div');
+    wrap.appendChild(checkbox('左右内边距随相邻自动缩放', function () {
+      return live().props.paddingAuto;
+    }, function (v) {
+      patchProps(el.id, { paddingAuto: v }); // v=true 时管线立即按相邻关系重算
+    }));
+    wrap.appendChild(h('div', {
+      class: 'hint-text',
+      text: '勾选时左右内边距在相邻元素一侧自动减半（0.2 ↔ 0.1）；手动修改任一侧即固定。',
+    }));
+    var grid = h('div', { style: 'display:grid;grid-template-columns:repeat(2,1fr);gap:6px' });
     var keys = [
-      { k: 'top', label: '上', max: 1 },
-      { k: 'right', label: '右', max: 8 },
-      { k: 'bottom', label: '下', max: 1 },
       { k: 'left', label: '左', max: 8 },
+      { k: 'right', label: '右', max: 8 },
+      { k: 'top', label: '上', max: 1 },
+      { k: 'bottom', label: '下', max: 1 },
     ];
     keys.forEach(function (item) {
       var input = numberInput({ min: '0', max: String(item.max), step: '0.05', title: item.label + '内边距' }, function (v) {
         var padding = {};
         padding[item.k] = Core.clamp(v, 0, item.max);
-        patchProps(el.id, { padding: padding });
+        var patch = { padding: padding };
+        // 手动修改左右任一侧 → 退出自动（钉住）
+        if (item.k === 'left' || item.k === 'right') patch.paddingAuto = false;
+        patchProps(el.id, patch);
       });
       input.value = el.props.padding[item.k];
       bindSync(input, function () { return live().props.padding[item.k]; });
@@ -968,7 +978,8 @@
         input,
       ]));
     });
-    return field('内边距（相对行高比例）', grid, '左右内边距可大于 1（元素更宽）');
+    wrap.appendChild(field('内边距（相对行高比例）', grid, '左右内边距可大于 1（元素更宽）'));
+    return wrap;
   }
 
   // ─── 预设预览面板 ──────────────────────────────────────────

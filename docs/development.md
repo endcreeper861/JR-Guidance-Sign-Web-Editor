@@ -24,6 +24,7 @@ core.js → icons.js → state.js → render.js → ui.js → presets.js
 
 - 状态模型（state.js）：`SignState { widthMode, width, rowHeight, aspectLocked, backgroundColor, rows }`，`Row { id, elements }`，`Element { id, type, props }`。所有操作（增删行/元素、移动、属性合并、序列化/反序列化校验）都是纯函数。
 - `App.layout` 缓存最近一次 `layoutSign` 结果，供交互层（落点指示、gap 计算）与设置面板复用。
+- 相邻自动内边距：元素属性 `paddingAuto`（新建默认 true，旧存档缺省 false 钉住）。`applyPaddingAuto` 在 App.update 管线中幂等重算——paddingAuto 元素的左/右侧在同行同通道紧邻其他元素（空白占位不算）时取 0.1，否则 0.2；经 `updateElementProps` 写入左右内边距视为手动编辑并钉住（false）。space 恒为 false。
 - 选中态（`App.selection.elementId`）不属于 SignState，驱动右栏面板模式（元素属性 / 预设预览 / 标识牌设置）。
 - 编辑器偏好（`App.prefs`：`autoLineColor` 自动配色开关、`paletteCity` 选色板城市）同样不属于 SignState（不进项目 JSON），存于 localStorage `sign-prefs`（storage.js `loadPrefs`/`savePrefs`）。城市切换时所有打开中的颜色选择器经 panel.js 的 `paletteCityFns` 观察者同步重建色板；`Core.lineColorFor(号, 城市)` 与 `Core.citySwatches(城市)` 为纯函数，城市表见 core.js `CITY_PALETTES`。
 

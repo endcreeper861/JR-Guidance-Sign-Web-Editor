@@ -959,6 +959,113 @@
       ok('S31 宽标识牌铺满画布', Math.abs(dispW2 - wrapW) < 2, 'w=' + dispW2 + ' wrap=' + wrapW);
     }
 
+    function s32_autoAdjacentPadding() {
+      var w = W(), S = w.SignState;
+      w.App.update(function (st) {
+        st = S.updateSignSettings(S.clearSign(st), { width: 1000 });
+        var a = S.createElement('big-number', { text: '1' });
+        var b = S.createElement('bilingual-text', { textZh: '甲', textEn: 'A' });
+        st = S.addElement(st, st.rows[0].id, a);
+        return S.addElement(st, st.rows[0].id, b);
+      });
+      var row = w.App.state.rows[0];
+      var A = row.elements[0].id, B = row.elements[1].id;
+      function pad(id, side) {
+        return S.findElement(w.App.state, id).element.props.padding[side];
+      }
+      function padField() {
+        return $$('#right-panel-body .field').filter(function (f) {
+          var l = f.querySelector('label');
+          return l && l.textContent === '内边距（相对行高比例）';
+        })[0];
+      }
+      function autoCb() {
+        return $$('#right-panel-body .field-inline').filter(function (f) {
+          return f.textContent.indexOf('随相邻自动缩放') !== -1;
+        })[0].querySelector('input');
+      }
+      ok('S32 相邻自动折减：A右=0.1 B左=0.1',
+        pad(A, 'right') === 0.1 && pad(B, 'left') === 0.1,
+        'A右=' + pad(A, 'right') + ' B左=' + pad(B, 'left'));
+      ok('S32 外侧保持 0.2', pad(A, 'left') === 0.2 && pad(B, 'right') === 0.2);
+      // 面板：复选框勾选、输入框显示折减值
+      w.App.select(A);
+      var cb = autoCb();
+      ok('S32 面板复选框勾选', !!cb && cb.checked);
+      var aInputs = padField().querySelectorAll('input');
+      ok('S32 输入框显示自动值（左0.2/右0.1）',
+        aInputs[0].value === '0.2' && aInputs[1].value === '0.1',
+        aInputs[0].value + '/' + aInputs[1].value);
+      // 手动修改左内边距 → 钉住（复选框取消、值固定）
+      typeInto(aInputs[0], '0.3');
+      ok('S32 手动修改 → 钉住', w.App.state.rows[0].elements[0].props.paddingAuto === false
+        && pad(A, 'left') === 0.3);
+      ok('S32 钉住后复选框取消', !cb.checked);
+      // 删除邻居 B → 钉住侧不变（非钉住时会恢复 0.2）
+      w.App.update(function (st) { return S.deleteElement(st, B); });
+      ok('S32 邻居删除后钉住侧不变', pad(A, 'left') === 0.3, 'left=' + pad(A, 'left'));
+      // 重新勾选 → 恢复自动（无邻居回 0.2）
+      w.App.select(A);
+      cb = autoCb();
+      cb.click();
+      ok('S32 重新勾选恢复自动（0.2）',
+        w.App.state.rows[0].elements[0].props.paddingAuto === true && pad(A, 'left') === 0.2
+          && pad(A, 'right') === 0.2);
+      // space 不算邻居（全新一行验证：A2|space|B2 两侧都不折减）
+      w.App.update(function (st) {
+        st = S.addRow(st);
+        var rid = st.rows[st.rows.length - 1].id;
+        var a2 = S.createElement('big-number', { text: '5' });
+        var sp = S.createElement('space', { widthRatio: 0.3 });
+        var b2 = S.createElement('big-number', { text: '6' });
+        st = S.addElement(st, rid, a2);
+        st = S.addElement(st, rid, sp);
+        return S.addElement(st, rid, b2);
+      });
+      var row2 = w.App.state.rows[w.App.state.rows.length - 1];
+      ok('S32 space 不算邻居 → 两侧不折减',
+        pad(row2.elements[0].id, 'right') === 0.2 && pad(row2.elements[2].id, 'left') === 0.2,
+        'A2右=' + pad(row2.elements[0].id, 'right') + ' B2左=' + pad(row2.elements[2].id, 'left'));
+      w.App.select(null);
+    }
+
+    function s33_dropIndicatorAlignment() {
+      var w = W(), S = w.SignState;
+      // 窄牌（400 < 画布宽）：指示线必须相对 SVG 显示区定位，而非整个画布
+      w.App.update(function (st) {
+        st = S.updateSignSettings(st, { width: 400, rowHeight: 100 });
+        st = S.clearSign(st);
+        var a = S.createElement('space', { widthRatio: 0.5 });
+        var b = S.createElement('space', { widthRatio: 0.5 });
+        st = S.addElement(st, st.rows[0].id, a);
+        return S.addElement(st, st.rows[0].id, b);
+      });
+      var row = w.App.state.rows[0];
+      var B = row.elements[1].id;
+      var svgRect = $('#sign-svg').getBoundingClientRect();
+      var scale = svgRect.width / w.App.layout.width; // 每单位坐标的显示像素
+      function dragTo(signX) {
+        var gg = $('g.element[data-element-id="' + B + '"]');
+        var grr = gg.getBoundingClientRect();
+        mouse('mousedown', gg, grr.left + grr.width / 2, grr.top + grr.height / 2);
+        mouse('mousemove', w.document, svgRect.left + signX * scale, svgRect.top + svgRect.height * 0.5);
+        var ind = $('#element-drop-indicator');
+        var left = svgRect.left + svgRect.width * (parseFloat(ind.style.left) / 100);
+        mouse('mouseup', w.document, svgRect.left + signX * scale, svgRect.top + svgRect.height * 0.5);
+        return left;
+      }
+      // 指针在首元素左半部 → 插入点在首元素之前，指示线贴内容起点
+      var at10 = dragTo(10);
+      ok('S33 指针在首元素左半部 → 指示线贴内容起点',
+        Math.abs(at10 - svgRect.left) < 3, at10 + ' vs ' + svgRect.left);
+      var at50 = dragTo(50);
+      ok('S33 指针在两元素之间 → 指示线在 50',
+        Math.abs(at50 - (svgRect.left + 50 * scale)) < 3, at50 + ' vs ' + (svgRect.left + 50 * scale));
+      var at350 = dragTo(350);
+      ok('S33 指针超出内容 → 指示线钉在内容末端',
+        Math.abs(at350 - (svgRect.left + 100 * scale)) < 3, at350 + ' vs ' + (svgRect.left + 100 * scale));
+    }
+
     // ─── 主流程 ───────────────────────────────────────────
 
     var frameEl = document.getElementById('app-frame');
@@ -996,6 +1103,8 @@
         await s29_deleteKeyAndEmptyRow();
         s30_signFrame();
         s31_miscFixes();
+        s32_autoAdjacentPadding();
+        s33_dropIndicatorAlignment();
       }).then(function () {
         var passed = results.filter(function (r) { return r.pass; }).length;
         var total = results.length;
