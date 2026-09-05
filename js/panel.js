@@ -934,6 +934,7 @@
       value: el.props.color,
       onChange: function (v) { patchProps(el.id, { color: v }); },
     })));
+    // 元素背景色由通用分发器统一追加（buildFields 末尾，space/exit 除外）
   }
 
   function buildBackgroundPicker(el) {

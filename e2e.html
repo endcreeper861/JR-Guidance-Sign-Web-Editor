@@ -612,6 +612,23 @@
       ok('S23 切换图标生效', st.props.icon === 'stairs');
       var svg = $('#sign-svg g.element.selected svg');
       ok('S23 画布渲染嵌套图标 svg', !!svg);
+      // 图标元素背景色：面板提供「元素背景色」选择器，点出口黄后状态与画布同步
+      var S23 = w.SignState;
+      var pickers23 = $$('#right-panel-body .color-picker');
+      var bgPicker23 = pickers23[pickers23.length - 1];
+      var exitSwatch = bgPicker23 ? Array.prototype.slice.call(bgPicker23.querySelectorAll('.cp-swatch')).filter(function (b) {
+        return b.title === '出口黄';
+      })[0] : null;
+      ok('S23 图标面板提供元素背景色选择器（含出口黄色板）', !!exitSwatch);
+      if (exitSwatch) {
+        exitSwatch.click();
+        var stIcon = S23.findElement(w.App.state, last.id).element;
+        ok('S23 点击出口黄 → 背景色写入状态', stIcon.props.backgroundColor === '#F7D917',
+          'bg=' + stIcon.props.backgroundColor);
+        var bgRect = $('#sign-svg g.element[data-element-id="' + last.id + '"] > rect');
+        ok('S23 画布渲染元素背景矩形', bgRect && bgRect.getAttribute('fill') === '#F7D917',
+          bgRect ? bgRect.getAttribute('fill') : 'no rect');
+      }
       // 添加一个方向图标元素并改向
       $$('.palette-card .card-name').filter(function (n) { return n.textContent === '前方向左'; })[0]
         .parentNode.click();
