@@ -579,7 +579,7 @@
       class: 'btn btn-danger', text: '🗑 清空标识牌',
       style: 'margin-top:6px',
     })).addEventListener('click', function () {
-      SignUI.confirmDialog('确定要清空所有元素吗？此操作会移除所有行和元素，恢复为一行空白。', '清空标识牌', '清空').then(function (ok) {
+      SignUI.confirmDialog('确定要清空所有行和元素吗？', '清空标识牌', '清空').then(function (ok) {
         if (!ok) return;
         App.update(State.clearSign);
         App.select(null);
@@ -659,7 +659,7 @@
         { value: 'right', label: '贴右' },
       ], function () { return live().props.elementAlign; }, function (v) {
         patchProps(el.id, { elementAlign: v });
-      }), '固定宽度下元素贴左/居中/贴右排列；不同对齐可能重叠，可加大牌宽避免'));
+      })));
     }
 
     if (el.type !== 'space' && el.type !== 'exit') {
@@ -761,7 +761,7 @@
       { value: 'right', label: '右对齐' },
     ], function () { return live().props.align; }, function (v) {
       patchProps(el.id, { align: v });
-    }), '元素内部的镜像排版，与元素对齐无关');
+    }));
   }
 
   function buildNumberLineFields(root, el, live) {
@@ -842,7 +842,6 @@
     root.appendChild(checkbox('线路名下沉', function () { return live().props.nameSink; }, function (v) {
       patchProps(el.id, { nameSink: v });
     }));
-    root.appendChild(h('div', { class: 'hint-text', text: '开启：线路名大字显示并与「线」组合；关闭：线路名与「线」同字号完整显示输入文本，英文名仍在其下方' }));
 
     var t = textInput({ value: el.props.text, placeholder: '如：环 / 机场联络线' }, function (v) {
       patchProps(el.id, { text: v });
@@ -945,7 +944,7 @@
       onChange: function (v) { patchProps(el.id, { backgroundColor: v }); },
     });
     wrap.appendChild(picker);
-    return field('元素背景色', wrap, '透明时透出标识牌背景');
+    return field('元素背景色', wrap);
   }
 
   function buildPaddingEditor(el, live) {
