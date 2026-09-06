@@ -303,7 +303,7 @@
       ok('S08 拖放新元素到指定行', row0.elements[row0.elements.length - 1].type === 'big-number');
       // 卡片点击 → 加到末行
       var lastRowBefore = w.App.state.rows[w.App.state.rows.length - 1].elements.length;
-      $$('.palette-card').filter(function (c) { return c.textContent.indexOf('大数字') !== -1; })[0].click();
+      $$('.palette-card').filter(function (c) { return c.textContent.indexOf('大文本') !== -1; })[0].click();
       ok('S08 点击卡片添加到末行', w.App.state.rows[w.App.state.rows.length - 1].elements.length === lastRowBefore + 1);
     }
 
@@ -1069,6 +1069,59 @@
         Math.abs(at350 - (svgRect.left + 100 * scale)) < 3, at350 + ' vs ' + (svgRect.left + 100 * scale));
     }
 
+    // S34：hex 输入框不打断输入（回归：3 位缩写 '#737' 提交曾把输入框改写为
+    // '#773377' 并顶走光标，与用户后续编辑互相打架、删不掉）
+    function s34_hexInputNoClobber() {
+      var w = W(), S = w.SignState;
+      w.App.update(function (st) {
+        st = S.updateSignSettings(S.clearSign(st), { width: 900 });
+        return S.addElement(st, st.rows[0].id, S.createElement('exit', { code: '1' }));
+      });
+      w.App.select(w.App.state.rows[0].elements[0].id);
+      var hex = $('#right-panel-body .hex-input');
+      function color() { return w.App.state.rows[0].elements[0].props.color; }
+      function type(input, text) {
+        input.focus();
+        var start = input.selectionStart == null ? input.value.length : input.selectionStart;
+        input.value = input.value.slice(0, start) + text + input.value.slice(input.selectionEnd == null ? start : input.selectionEnd);
+        input.selectionStart = input.selectionEnd = start + text.length;
+        input.dispatchEvent(new w.Event('input', { bubbles: true }));
+      }
+      hex.focus();
+      hex.select();
+      type(hex, '#737');
+      ok('S34 打到 #737（3位缩写）提交 #773377 但字段文本不被改写',
+        color() === '#773377' && hex.value === '#737',
+        'field=' + hex.value + ' color=' + color());
+      type(hex, '8be');
+      ok('S34 完成输入 #7378be：字段原样、值已提交',
+        hex.value === '#7378be' && color() === '#7378BE' && !hex.classList.contains('invalid'),
+        'field=' + hex.value + ' color=' + color());
+      // 无 # 前缀的 6 位写法：提交规整值、字段保持用户原文
+      hex.focus();
+      hex.select();
+      type(hex, 'a1b2c3');
+      ok('S34 无 # 输入 a1b2c3 → 提交 #A1B2C3、字段原样',
+        hex.value === 'a1b2c3' && color() === '#A1B2C3',
+        'field=' + hex.value + ' color=' + color());
+      // 失焦后外部同步恢复：移走焦点再触发一次渲染，字段应规整为已提交值
+      hex.blur();
+      w.App.select(null);
+      w.App.select(w.App.state.rows[0].elements[0].id);
+      var hex2 = $('#right-panel-body .hex-input');
+      ok('S34 失焦后字段规整为已提交值',
+        hex2.value === '#A1B2C3', 'field=' + hex2.value);
+      // 非法输入只标 invalid，不改写、不提交
+      hex2.focus();
+      hex2.select();
+      type(hex2, 'zz');
+      ok('S34 非法输入标 invalid、提交值不变',
+        hex2.classList.contains('invalid') && hex2.value === 'zz' && color() === '#A1B2C3',
+        'field=' + hex2.value + ' color=' + color());
+      hex2.blur();
+      w.App.select(null);
+    }
+
     // ─── 主流程 ───────────────────────────────────────────
 
     var frameEl = document.getElementById('app-frame');
@@ -1108,6 +1161,7 @@
         s31_miscFixes();
         s32_autoAdjacentPadding();
         s33_dropIndicatorAlignment();
+        s34_hexInputNoClobber();
       }).then(function () {
         var passed = results.filter(function (r) { return r.pass; }).length;
         var total = results.length;

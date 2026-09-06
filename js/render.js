@@ -7,7 +7,7 @@
  *
  * 关键比例均移植自 sign_jr.py（PRD 指定参考实现）：
  *   双语文本字号  size × 506/800（中）/ × 285/800（英）
- *   大数字/编号   size × 1.3，Frutiger
+ *   大文本/编号   size × 1.3，Frutiger（中文经 FONT_NUM 栈回退思源黑体）
  *   线路色条宽    size × 10/28
  *   箭头          双 45° 梯形箭头头 + 矩形箭柄（柄厚 = thickness/√2）
  */
@@ -21,7 +21,7 @@
 
   var ZH_FONT_RATIO = 506 / 800;   // 0.6325  中文字号（= 中文字面高 0.58s ÷ 思源墨高比 0.92）
   var EN_FONT_RATIO = 285 / 800;   // 0.35625 英文字号（= 英文 cap 高 0.2565s ÷ cap 比 0.72）
-  var NUM_FONT_RATIO = 1.3;        // 大数字/编号字号
+  var NUM_FONT_RATIO = 1.3;        // 大文本/编号字号
   var STRIPE_RATIO = 10 / 28;      // 线路色条宽
   var LABEL_BOX_RATIO = 0.75;      // 组合元素尾部双语标签的内容盒高
   var EN_ALIGN_OFFSET = 1 / 30;    // 英文左右对齐时的额外缩进
@@ -184,9 +184,12 @@
     // 垂直解剖锚定：数字墨区顶（cap 顶）= 内容顶 + 顶部引导（与双语文本墨区顶统一）
     var base = p.t + INK_TOP_LEADING * p.size + NUM_ASC * size;
     var t = inkTextLayout(text, p.size, size, m, Core.FONT_NUM, 'lsb');
+    // 光学居中：首末字形的字距边距不对称（「1」左空大、「2」右空小），
+    // 整体平移使左右墨区间距相等——独立文本元素的边界即视觉边界
+    var optical = (t.firstInkLeft - (t.textW - t.lastInkRight)) / 2;
     return {
       pad: p, fontSize: size, textW: t.textW,
-      digits: t.chars,
+      digits: t.chars.map(function (d) { return { ch: d.ch, x: d.x - optical }; }),
       base: base,
       width: t.textW + p.l + p.r,
     };
@@ -235,25 +238,38 @@
   }
 
   /**
-   * 墨区文本排版（大数字策略，全文本类元素共用）：
+   * 墨区文本排版（大文本策略，全文本类元素共用）：
    * 多位文本逐字按墨区间距 g 紧排；单字符按自身前进宽居中。
    * edge='lsb'：首位墨区锚定自身字距边距 lsb、末位保留字距右缘——独立文本
-   *   （大数字/编号/文本线路大字），盒边距不随内容变化；
+   *   （大文本/编号/文本线路大字），盒边距不随内容变化；
    * edge='margin'：首位/末位墨区各留基准墨边距 M（紧贴色条等实体对象）——数字线路。
    * font 为测量/绘制字体栈（数字用 FONT_NUM，中文用 FONT_ZH）。
    * 返回 { chars:[{ch,x}], textW, margin }，x 相对文本盒左缘。
    */
   function inkTextLayout(text, slotSize, fontSize, m, font, edge) {
     if (!text) {
-      return { chars: [], textW: edge === 'margin' ? slotSize : 0, margin: 0 };
+      return {
+        chars: [], textW: edge === 'margin' ? slotSize : 0, margin: 0,
+        firstInkLeft: edge === 'margin' ? slotSize : 0,
+        lastInkRight: edge === 'margin' ? slotSize : 0,
+      };
     }
     if (text.length === 1 && edge !== 'margin') {
       var wOnly = m(text, font, 400, fontSize);
-      return { chars: [{ ch: text, x: wOnly / 2 }], textW: wOnly, margin: 0 };
+      var inkOnly = m.ink(text, font, 400, fontSize);
+      return {
+        chars: [{ ch: text, x: wOnly / 2 }], textW: wOnly, margin: 0,
+        firstInkLeft: wOnly / 2 - inkOnly.adv / 2 - inkOnly.abl,
+        lastInkRight: wOnly / 2 - inkOnly.adv / 2 + inkOnly.abr,
+      };
     }
     var layout = digitLayout(text, slotSize, fontSize, m, font);
     if (edge === 'margin') {
-      return { chars: layout.digits, textW: layout.advance, margin: layout.margin };
+      return {
+        chars: layout.digits, textW: layout.advance, margin: layout.margin,
+        firstInkLeft: layout.margin,
+        lastInkRight: layout.advance - layout.margin,
+      };
     }
     var firstInk = m.ink(text.charAt(0), font, 400, fontSize);
     var shift = -firstInk.abl - layout.margin;
@@ -262,6 +278,8 @@
     return {
       chars: chars,
       textW: chars[chars.length - 1].x + lastInk.adv / 2, // 末位前进盒右缘
+      firstInkLeft: chars[0].x - firstInk.adv / 2 - firstInk.abl,
+      lastInkRight: chars[chars.length - 1].x - lastInk.adv / 2 + lastInk.abr,
       margin: layout.margin,
     };
   }
@@ -395,19 +413,25 @@
     var right = alignable && el.props.align === 'right';
     // 编号基线公式两种模式一致（内容对齐仅镜像水平次序）
     var codeBase = p.t + label.zhBase - label.zhAscent + m.ascent(code, Core.FONT_NUM, 400, size);
-    // 编号墨区排版：与大数字同一策略（inkTextLayout，见其注释）
+    // 编号墨区排版：与大文本同一策略（inkTextLayout，见其注释）；
+    // 末位补基准墨边距 M₃ 且不叠加 s/8——编号↔标签的间距公式与数字线路
+    // 「数字 ↔ 号线」完全一致（labelX = 盒左缘 + 编号宽，M₃ 内含于编号宽）
     var codeT = inkTextLayout(code, s, size, m, Core.FONT_NUM, 'lsb');
     var codeChars = codeT.chars;
-    var codeW = codeT.textW;
+    var ink3 = m.ink('3', Core.FONT_NUM, 400, size);
+    var trailingMargin = (s - ink3.adv) / 2 - ink3.abl;
+    var codeW = codeT.lastInkRight + trailingMargin;
     if (right) {
-      var rightCodeX = p.l + label.width + gap;
+      // 右对齐为左对齐的镜像：标签侧留 M₃，编号墨区外缘齐平于右内容缘
+      // （codeW 含末位 M₃，此处不再叠加）
+      var rightCodeX = p.l + label.width + trailingMargin;
       return {
         pad: p, size: s, codeSize: size, codeW: codeW,
         codeBase: codeBase,
         codeCenterX: rightCodeX + codeW / 2, // 编号移至标签右侧
         codeChars: codeChars, codeX: rightCodeX,
-        gap: gap, label: label, labelX: p.l, labelAlign: 'right',
-        width: p.l + label.width + gap + codeW + p.r,
+        gap: trailingMargin, label: label, labelX: p.l, labelAlign: 'right',
+        width: p.l + label.width + codeW + p.r,
       };
     }
     return {
@@ -415,8 +439,8 @@
       codeBase: codeBase,
       codeCenterX: p.l + codeW / 2,
       codeChars: codeChars, codeX: p.l,
-      gap: gap, label: label, labelX: p.l + codeW + gap, labelAlign: 'left',
-      width: p.l + codeW + gap + label.width + p.r,
+      gap: trailingMargin, label: label, labelX: p.l + codeW, labelAlign: 'left',
+      width: p.l + codeW + label.width + p.r,
     };
   }
 

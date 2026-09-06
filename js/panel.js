@@ -19,7 +19,7 @@
   var TYPE_NAMES = {
     'arrow': '箭头',
     'bilingual-text': '双语文本',
-    'big-number': '大数字',
+    'big-number': '大文本',
     'number-line': '数字线路',
     'text-line': '文本线路',
     'entrance': '出入口',
@@ -287,15 +287,18 @@
     var nullBtn = nullable ? h('button', { class: 'cp-null-btn', text: '透明', title: '清除颜色（透明）' }) : null;
 
     function paint() {
+      // hex 输入框聚焦中（用户正在打字）时不得改写其文本，否则输入被规整化
+      // 改写、光标跳末尾，与用户的编辑互相打架（删除 '#'/退格均被顶回）。
+      var hexIdle = document.activeElement !== hex;
       if (value === null) {
         current.classList.add('nullable-null');
         current.removeAttribute('style');
-        hex.value = '';
+        if (hexIdle) hex.value = '';
         if (nullBtn) nullBtn.classList.add('active');
       } else {
         current.classList.remove('nullable-null');
         current.style.background = value;
-        hex.value = value;
+        if (hexIdle) hex.value = value;
         native.value = value;
         if (nullBtn) nullBtn.classList.remove('active');
       }
@@ -311,12 +314,14 @@
     }
 
     hex.addEventListener('input', function () {
-      var v = hex.value.trim();
+      var raw = hex.value.trim();
+      // 无 # 前缀的 6 位写法（如 7378be）也接受：只规整提交值，不改写输入框文本
+      var v = raw && raw.charAt(0) !== '#' ? '#' + raw : raw;
       if (Core.isHexColor(v)) {
         hex.classList.remove('invalid');
         commit(Core.normalizeHex(v));
       } else {
-        hex.classList.toggle('invalid', v.length > 0);
+        hex.classList.toggle('invalid', raw.length > 0);
       }
     });
     hex.addEventListener('blur', function () { paint(); });
@@ -743,7 +748,7 @@
   }
 
   function buildBigNumberFields(root, el, live) {
-    var t = textInput({ value: el.props.text, placeholder: '数字文本' }, function (v) {
+    var t = textInput({ value: el.props.text, placeholder: '文本，如 16 / 1/2/3/4 / 16号线' }, function (v) {
       patchProps(el.id, { text: v });
     });
     bindSync(t, function () { return live().props.text; });

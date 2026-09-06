@@ -178,6 +178,10 @@
         var tm = ctx.measureText(node.textContent);
         return parseFloat(node.getAttribute('x')) - tm.width / 2 - tm.actualBoundingBoxLeft;
       }
+      function inkRightOf(node) {
+        var tm = ctx.measureText(node.textContent);
+        return parseFloat(node.getAttribute('x')) - tm.width / 2 + tm.actualBoundingBoxRight;
+      }
       // 每条线路自己的色条右缘（'3'→第0条，'14'→第1条，'22'→第2条）
       var stripeRights = Array.prototype.slice.call(r.node.querySelectorAll('rect')).slice(0, 3)
         .map(function (r2) { return parseFloat(r2.getAttribute('x')) + parseFloat(r2.getAttribute('width')); });
@@ -322,6 +326,30 @@
       assertEqual(parseFloat(texts3[2].getAttribute('x')), mtR.labelX + mtR.label.width - enWEx, 'Exit 右对齐');
     });
 
+    test('BigNumber 光学居中：12 左右墨区间距相等（真实字体回归）', function () {
+      var el = SignState.createElement('big-number', { text: '12' });
+      var r = SignRender.renderElement(el, 256, measure);
+      fixture.appendChild(r.node);
+      var texts = r.node.querySelectorAll('text');
+      var ctx = document.createElement('canvas').getContext('2d');
+      var fs = texts[0].getAttribute('font-size');
+      ctx.font = '400 ' + fs + 'px ' + texts[0].getAttribute('font-family');
+      function inkLeft(t) {
+        var tm = ctx.measureText(t.textContent);
+        return parseFloat(t.getAttribute('x')) - tm.width / 2 - tm.actualBoundingBoxLeft;
+      }
+      function inkRight(t) {
+        var tm = ctx.measureText(t.textContent);
+        return parseFloat(t.getAttribute('x')) - tm.width / 2 + tm.actualBoundingBoxRight;
+      }
+      var elW = +r.node.querySelector('rect').getAttribute('width');
+      var leftGap = inkLeft(texts[0]);
+      var rightGap = elW - inkRight(texts[texts.length - 1]);
+      assert(Math.abs(leftGap - rightGap) < 1.5,
+        '左右墨区间距应相等 ' + leftGap + ' vs ' + rightGap);
+      fixture.removeChild(r.node);
+    });
+
     test('BigNumber 多位数：按墨区间距逐字排列（含 1 不松散）', function () {
       var el = SignState.createElement('big-number', { text: '14' });
       var r = SignRender.renderElement(el, 256, measure);
@@ -337,6 +365,10 @@
         var tm = ctx.measureText(node.textContent);
         return parseFloat(node.getAttribute('x')) - tm.width / 2 - tm.actualBoundingBoxLeft;
       }
+      function inkRightOf(node) {
+        var tm = ctx.measureText(node.textContent);
+        return parseFloat(node.getAttribute('x')) - tm.width / 2 + tm.actualBoundingBoxRight;
+      }
       function inkW(ch) {
         var tm = ctx.measureText(ch);
         return tm.actualBoundingBoxRight + tm.actualBoundingBoxLeft;
@@ -346,11 +378,14 @@
       var g = -tm3.actualBoundingBoxLeft + (tm3.width - tm3.actualBoundingBoxRight);
       var gap14 = inkLeftOf(texts[1]) - (inkLeftOf(texts[0]) + inkW('1'));
       assert(Math.abs(gap14 - g) < 1.5, '1→4 墨区间距应为基准值 ' + gap14 + ' vs ' + g);
-      // 首位墨区贴齐盒左缘并保留首位字形自己的字距边距（盒边距不随位数变化）
+      // 光学居中：首位墨区左空 = 末位墨区右空（「1」左字距大、「4」右字距小，平分）
       var padL = 256 * 0.2;
-      var tm1 = ctx.measureText('1');
-      var lsb1 = -tm1.actualBoundingBoxLeft;
-      assert(Math.abs(inkLeftOf(texts[0]) - (padL + lsb1)) < 1.5, '首位墨区 = 盒左缘 + 首位字距边距');
+      var inkLeft0 = inkLeftOf(texts[0]);
+      var inkRightLast = inkRightOf(texts[texts.length - 1]); // 末位墨区右缘 = x − adv/2 + abr
+      var textW = r.width - padL * 2; // 内容盒宽（元素宽 − 左右内边距）
+      var leftGap = inkLeft0 - padL;
+      var rightGap = textW - (inkRightLast - padL);
+      assert(Math.abs(leftGap - rightGap) < 1.5, '光学居中：左右墨区间距相等 ' + leftGap + ' vs ' + rightGap);
       assertEqual(r.width, SignRender.elementMetrics(el, 256, measure).width, '宽度 = metrics');
     });
 

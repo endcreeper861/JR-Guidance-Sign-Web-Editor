@@ -174,7 +174,7 @@
 
   var FONT_ZH = "'Source Han Sans SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif";
   var FONT_EN = "'Helvetica', 'Frutiger', Arial, sans-serif";
-  // 数字/西文栈：Frutiger 优先；无 CJK 字形，中文经栈回退到思源黑体（大数字等元素的中文）
+  // 数字/西文栈：Frutiger 优先；无 CJK 字形，中文经栈回退到思源黑体（大文本等元素的中文）
   var FONT_NUM = "'Frutiger', 'Helvetica', 'Source Han Sans SC', Arial, sans-serif";
   var FONT_NUM_CONDENSED = "'Frutiger Condensed', 'Frutiger', Arial, sans-serif";
 
