@@ -16,8 +16,11 @@ const R = globalThis.SignRender;
 const Core = globalThis.SignCore;
 
 const measure = (text, family, weight, size) => Math.ceil(String(text).length * size * 0.9);
-// 假墨区度量：字肩/墨宽按比例（真实实现在浏览器里用 actualBoundingBox*）
-measure.ascent = (text, family, weight, size) => Math.ceil(String(text).length * size * 0.8);
+// 假墨区度量：按字体族校准的解剖比例（与渲染层排版解剖常数一致，Node/浏览器同值）
+measure.ascent = (text, family, weight, size) =>
+  Math.ceil(size * (family === Core.FONT_ZH ? 0.80 : family === Core.FONT_NUM ? 0.70 : 0.72));
+measure.descent = (text, family, weight, size) =>
+  size * (family === Core.FONT_ZH ? 0.09 : 0.21);
 measure.ink = (text, family, weight, size) => ({
   abl: -0.05 * size,
   abr: 0.85 * size,
@@ -92,14 +95,14 @@ test('双语文本字号与宽度', () => {
   const el = S.createElement('bilingual-text', { textZh: '站名', textEn: 'Station' });
   const w = R.computeElementWidth(el, 100, measure);
   const bi = R.bilingualMetrics('站名', 'Station', 60, measure, false);
-  assert.ok(Math.abs(bi.zhSize - 60 * 506 / 800) < 1e-9);
-  assert.ok(Math.abs(bi.enSize - 60 * 285 / 800) < 1e-9);
-  assert.equal(bi.zhW, 69);   // ceil(2 × 37.95 × 0.9)
-  assert.equal(bi.enW, 135);  // ceil(7 × 21.375 × 0.9)
+  assert.ok(Math.abs(bi.zhSize * R.CJK_FACE - 0.582 * 60) < 0.01);  // 中文墨高 = 0.58s（字面高意图）
+  assert.ok(Math.abs(bi.enSize * (R.EN_CAP + R.EN_DESC) - 0.57 * 0.582 * 60) < 0.05); // 英文行 = 0.57×中文墨高
+  assert.equal(bi.zhW, 69);   // ceil(2 × 37.9565 × 0.9)
+  assert.equal(bi.enW, 135);  // ceil(7 × 21.4 × 0.9)
   assert.equal(w, 135 + 40);
-  // 基线比例来自 sign_jr 的 PIL 定位公式
-  assert.ok(Math.abs(bi.zhBase - 60 * (-1 / 6 + 1.16 * 506 / 800)) < 1e-9);
-  assert.ok(Math.abs(bi.enBase - 60 * (2 / 3 + 0.9277 * 285 / 800)) < 1e-6);
+  // 基线 = 解剖锚定：墨区顶（内容顶 + 顶部引导）+ 中文字面高；英文 cap 顶 = 中文墨区底 + 间隙
+  assert.ok(Math.abs(bi.zhBase - (0.036 * 60 + R.CJK_ASC * bi.zhSize)) < 1e-9);
+  assert.ok(Math.abs(bi.enBase - (bi.zhBase + R.CJK_DESC * bi.zhSize + R.ZH_EN_GAP * 60 + R.EN_CAP * bi.enSize)) < 1e-6);
 });
 
 test('大数字字号 1.3 倍、宽度含内边距', () => {
@@ -108,7 +111,7 @@ test('大数字字号 1.3 倍、宽度含内边距', () => {
   assert.equal(mt.fontSize, 78);            // 60 × 1.3
   assert.equal(mt.textW, 71);               // ceil(1 × 78 × 0.9)
   assert.equal(mt.width, 71 + 40);
-  assert.ok(Math.abs(mt.base - (20 + 60 * 0.975)) < 1e-9);
+  assert.ok(Math.abs(mt.base - (20 + 0.036 * 60 + R.NUM_ASC * 78)) < 1e-9); // 墨区顶 0.036s + 数字上伸 0.70em
 });
 
 test('大数字多位数：中段墨区紧排、盒边距与单位数一致', () => {
@@ -129,7 +132,7 @@ test('大数字多位数：中段墨区紧排、盒边距与单位数一致', ()
   assert.ok(Math.abs(mt.textW - ink1.adv * 2) < 1e-9);
   assert.equal(mt.width, mt.textW + 40);
   assert.equal(mt.fontSize, 78);
-  assert.ok(Math.abs(mt.base - (20 + 60 * 0.975)) < 1e-9); // 基线不变
+  assert.ok(Math.abs(mt.base - (20 + 0.036 * 60 + R.NUM_ASC * 78)) < 1e-9); // 基线不变
   // 单位数行为不变
   const one = R.elementMetrics(S.createElement('big-number', { text: '1' }), 100, measure);
   assert.equal(one.textW, measure('1', Core.FONT_NUM, 400, 78));
@@ -217,8 +220,8 @@ test('文本线路：贯穿色条 + 大字占位 + 线/英文名标签', () => {
   const labelW = Math.max(Math.ceil(1 * 45 * 0.6325 * 0.9), Math.ceil(9 * 45 * 0.35625 * 0.9));
   assert.equal(mt.label.width, labelW);           // 线 / Loop Line
   // 环与色条、环与「线」标签间距相等（各占一个 gap）
-  assert.ok(Math.abs((mt.textCenterX - mt.textW / 2) - (20 + mt.stripeW) - s / 8) < 1e-9);
-  assert.ok(Math.abs(mt.labelX - (mt.textCenterX + mt.textW / 2) - s / 8) < 1e-9);
+  assert.ok(Math.abs(mt.textX - (20 + mt.stripeW) - s / 8) < 1e-9);
+  assert.ok(Math.abs(mt.labelX - (mt.textX + mt.textW) - s / 8) < 1e-9);
   assert.equal(mt.width, 20 + mt.stripeW + s / 8 + mt.textW + s / 8 + labelW + 20);
 });
 
@@ -257,7 +260,9 @@ test('文本线路：关闭下沉 = 「线」同级字号完整显示（不加�
   assert.ok(Math.abs(mt.label.zhSize - s * 0.75 * R.ZH_FONT_RATIO) < 1e-9); // 非站名级字号
   assert.equal(mt.label.zhW, measure('机场联络线', Core.FONT_ZH, 400, mt.label.zhSize)); // 中文按输入全文测量
   assert.ok(mt.label.enBase > mt.label.zhBase);   // 英文基线在中文之下
-  assert.equal(mt.label.enBase, s * 0.75 * R.EN_BASE_RATIO);
+  var labelInkTop = 0.036 * s; // 首行墨区顶（全文本类统一引导线）
+  var labelZhBase = labelInkTop + R.CJK_ASC * mt.label.zhSize;
+  assert.equal(mt.label.enBase, labelZhBase + R.CJK_DESC * mt.label.zhSize + R.ZH_EN_GAP * s + R.EN_CAP * mt.label.enSize); // 解剖锚定
   // 色条贯穿与色条→文字间距不变
   assert.ok(Math.abs(mt.stripeW - s * 10 / 28) < 1e-9);
   assert.equal(mt.stripeH, 80);
@@ -328,7 +333,7 @@ test('文字线路右对齐：色块移至右缘、标签盒内右对齐（宽�
   const stripeW = s * 10 / 28;
   const textW = measure('环', Core.FONT_ZH, 400, s);
   assert.equal(mt.labelAlign, 'right');
-  assert.equal(mt.textCenterX, 20 + textW / 2);   // 大字移到内容左缘
+  assert.equal(mt.textX, 20);                     // 大字墨区盒贴内容左缘
   assert.equal(mt.labelX, 20 + textW + s / 8);
   assert.ok(Math.abs(mt.stripeX - (mt.labelX + mt.label.width + s / 8)) < 1e-9);
   assert.ok(Math.abs(mt.stripeX + stripeW + 20 - mt.width) < 1e-9);
@@ -452,4 +457,64 @@ test('动态宽度忽略元素对齐，整体左起排列', () => {
   const slots = R.layoutSign(sign, measure).rows[0].elements;
   assert.equal(slots[0].x, 0);
   assert.equal(slots[1].x, 20);
+});
+
+test('数字线路右对齐：「1」与元素左缘的间距恒定（不随位数变化）', () => {
+  // 右对齐编号的左缘为外侧：单位「1」与多位首位数字的墨区都锚定基准墨边距 M，
+  // 到元素左缘的间距不随位数变化（与左对齐的色条侧同一套锚定）
+  const dbl = R.elementMetrics(
+    S.createElement('number-line', { lines: [{ number: '14', color: '#000000' }], align: 'right' }),
+    100, measure);
+  const ink1 = measure.ink('1', Core.FONT_NUM, 400, 78);
+  const ink3 = measure.ink('3', Core.FONT_NUM, 400, 78);
+  const M = (60 - ink3.adv) / 2 - ink3.abl;
+  const dblInkLeft = dbl.entries[0].digitsX + dbl.entries[0].digits[0].x - ink1.adv / 2 - ink1.abl;
+  assert.ok(Math.abs(dblInkLeft - (dbl.entries[0].digitsX + M)) < 1e-9,
+    '十位墨区 = 盒左缘 + M ' + dblInkLeft);
+  // 单位「1」同位（两位数不相对单位数位移）
+  const single = R.elementMetrics(
+    S.createElement('number-line', { lines: [{ number: '1', color: '#000000' }], align: 'right' }),
+    100, measure);
+  const singleInkLeft = single.entries[0].digitsX + single.entries[0].digits[0].x - ink1.adv / 2 - ink1.abl;
+  assert.ok(Math.abs(singleInkLeft - dblInkLeft) < 1e-9,
+    '单位「1」与「11」首位墨区同位 ' + singleInkLeft + ' vs ' + dblInkLeft);
+  // 右缘（标签侧）同样为 M：advance − 末位墨区右缘 = M
+  const lastInk = measure.ink('4', Core.FONT_NUM, 400, 78);
+  const lastInkRight = dbl.entries[0].digitsX + dbl.entries[0].digits[1].x - lastInk.adv / 2 + lastInk.abr;
+  assert.ok(Math.abs(dbl.entries[0].advance - (lastInkRight - dbl.entries[0].digitsX)) < 1e-9 ? false
+    : Math.abs(dbl.entries[0].advance - (lastInkRight - dbl.entries[0].digitsX) - M) < 1e-6,
+    'advance = 末位墨区右缘 + M');
+});
+
+test('出口编号：混排墨区策略与大数字一致（斜杠不与数字重叠）', () => {
+  // 与大数字同一策略：整串逐字墨区间距（斜杠/字母与相邻数字之间同样保持 g），
+  // 首位墨区锚定自身字距边距 lsb，末位保留字距右缘——盒边距不随内容变化
+  const ref = R.elementMetrics(S.createElement('big-number', { text: '1/2/11/3' }), 100, measure);
+  const ex = R.elementMetrics(S.createElement('exit', { code: '1/2/11/3' }), 100, measure);
+  assert.equal(ex.codeChars.length, 8);
+  assert.deepEqual(ex.codeChars.map(c => c.ch), ref.digits.map(d => d.ch));
+  ex.codeChars.forEach((c, i) => {
+    assert.ok(Math.abs(c.x - ref.digits[i].x) < 1e-9, '逐字坐标与大数字一致 #' + i);
+  });
+  assert.ok(Math.abs(ex.codeW - ref.textW) < 1e-9, '宽度与大数字一致');
+  // 相邻字符墨区间距 = g（斜杠与数字之间不再重叠）
+  const ink3 = measure.ink('3', Core.FONT_NUM, 400, 78);
+  const g = -ink3.abl + (ink3.adv - ink3.abr); // lsb₃ + rsb₃
+  for (let i = 1; i < ex.codeChars.length; i++) {
+    const inkPrev = measure.ink(ex.codeChars[i - 1].ch, Core.FONT_NUM, 400, 78);
+    const inkCur = measure.ink(ex.codeChars[i].ch, Core.FONT_NUM, 400, 78);
+    const inkRightPrev = ex.codeChars[i - 1].x - inkPrev.adv / 2 + inkPrev.abr;
+    const inkLeftCur = ex.codeChars[i].x - inkCur.adv / 2 - inkCur.abl;
+    assert.ok(Math.abs(inkLeftCur - inkRightPrev - g) < 1e-6, '相邻墨区间距 g #' + i);
+  }
+  // 单字符：居中于自身前进宽（绘制与整串居中一致）
+  const c1 = R.elementMetrics(S.createElement('exit', { code: 'C' }), 100, measure);
+  assert.equal(c1.codeChars.length, 1);
+  assert.ok(Math.abs(c1.codeChars[0].x - 71 / 2) < 1e-9);
+  assert.equal(c1.codeW, 71);
+  // '14' 同样走该策略（首位墨区 = 盒左缘 + lsb₁，与单位数盒边距一致）
+  const num = R.elementMetrics(S.createElement('exit', { code: '14' }), 100, measure);
+  const ink1 = measure.ink('1', Core.FONT_NUM, 400, 78);
+  const inkLeft = num.codeX + num.codeChars[0].x - ink1.adv / 2 - ink1.abl;
+  assert.ok(Math.abs(inkLeft - (num.codeX + -ink1.abl)) < 1e-9, '首位墨区 = 盒左缘 + lsb₁');
 });

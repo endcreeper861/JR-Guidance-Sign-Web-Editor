@@ -19,15 +19,24 @@
 
   // ─── 布局常量（相对内容尺寸 s 的比例）──────────────────────
 
-  var ZH_FONT_RATIO = 506 / 800;   // 0.6325  中文字号
-  var EN_FONT_RATIO = 285 / 800;   // 0.35625 英文字号
-  var ZH_BASE_RATIO = -1 / 6 + Core.FONT_METRICS.zhAsc * ZH_FONT_RATIO; // 0.5670 中文基线
-  var EN_BASE_RATIO = 2 / 3 + Core.FONT_METRICS.enAsc * EN_FONT_RATIO;  // 0.9972 英文基线
+  var ZH_FONT_RATIO = 506 / 800;   // 0.6325  中文字号（= 中文字面高 0.58s ÷ 思源墨高比 0.92）
+  var EN_FONT_RATIO = 285 / 800;   // 0.35625 英文字号（= 英文 cap 高 0.2565s ÷ cap 比 0.72）
   var NUM_FONT_RATIO = 1.3;        // 大数字/编号字号
-  var NUM_BASE_RATIO = Core.FONT_METRICS.numAsc * NUM_FONT_RATIO;       // 0.975 数字基线
   var STRIPE_RATIO = 10 / 28;      // 线路色条宽
   var LABEL_BOX_RATIO = 0.75;      // 组合元素尾部双语标签的内容盒高
   var EN_ALIGN_OFFSET = 1 / 30;    // 英文左右对齐时的额外缩进
+
+  // ─── 排版解剖常数（每 em 字号的墨区，实测思源黑体/Helvetica/Frutiger）──
+  // 首行墨区顶距内容顶的引导（全文本类统一 → 同顶内边距时墨区顶齐平，基线按各自上伸部推导）
+  var INK_TOP_LEADING = 0.036;
+  var CJK_FACE = 0.92;   // 思源黑体字面高（墨区上伸+下伸，实测 站）
+  var CJK_ASC = 0.84;    // 思源黑体墨区上伸
+  var CJK_DESC = 0.08;   // 思源黑体墨区下伸
+  var ZH_EN_GAP = 0.123; // 中文墨区底 → 英文 cap 顶（实测现布局）
+  var EN_ASC = 0.74;     // Helvetica 墨区上伸（含上伸部）
+  var EN_CAP = 0.72;     // Helvetica cap 高
+  var EN_DESC = 0.21;    // Helvetica 下伸
+  var NUM_ASC = 0.70;    // Frutiger 数字/大写墨区上伸
 
   // ─── 通用盒模型 ────────────────────────────────────────────
 
@@ -118,23 +127,32 @@
   // ─── 双语标签（组合元素内部复用：号线/出入口/出口/线）─────
 
   /**
-   * 双语文本测量。boxSize 为本标签自身的内容尺寸（非行高）。
-   * 返回 { width, zhSize, enSize, zhBase, enBase }
+   * 双语标签测量。boxSize 为本标签自身的内容尺寸（非行高）。
+   * cs 为宿主元素的内容尺寸：标签墨区顶 = 内容顶 + INK_TOP_LEADING×cs（与其他文本类统一）。
+   * 返回 { width, zhSize, enSize, zhBase, enBase, zhAbl, zhAbr, enAbl, enAbr }
    */
-  function bilingualMetrics(textZh, textEn, boxSize, measure, bold) {
+  function bilingualMetrics(textZh, textEn, boxSize, measure, bold, cs) {
     var weight = bold ? 700 : 400;
+    var content = cs || boxSize;
     var zhSize = boxSize * ZH_FONT_RATIO;
     var enSize = boxSize * EN_FONT_RATIO;
     var zhW = measure(textZh, Core.FONT_ZH, weight, zhSize);
     var enW = measure(textEn, Core.FONT_EN, weight, enSize);
+    var zhInk = measure.ink(textZh, Core.FONT_ZH, weight, zhSize);
+    var enInk = measure.ink(textEn, Core.FONT_EN, weight, enSize);
+    // 垂直解剖锚定：zh 墨区顶 = 内容顶 + 顶部引导；en 墨区顶 = zh 墨区底 + 间隙
+    var zhBase = INK_TOP_LEADING * content + CJK_ASC * zhSize;
+    var enBase = zhBase + CJK_DESC * zhSize + ZH_EN_GAP * content + EN_CAP * enSize;
     return {
       width: Math.max(zhW, enW),
       zhSize: zhSize,
       enSize: enSize,
       zhW: zhW,
       enW: enW,
-      zhBase: boxSize * ZH_BASE_RATIO,
-      enBase: boxSize * EN_BASE_RATIO,
+      zhBase: zhBase,
+      enBase: enBase,
+      zhAbl: zhInk.abl, zhAbr: zhInk.abr,
+      enAbl: enInk.abl, enAbr: enInk.abr,
       weight: weight,
       zhAscent: measure.ascent(textZh, Core.FONT_ZH, weight, zhSize), // 墨区上升高，用于顶对齐
     };
@@ -152,7 +170,7 @@
 
   function bilingualTextMetrics(el, h, m) {
     var p = contentBox(el.props.padding, h);
-    var bi = bilingualMetrics(el.props.textZh, el.props.textEn, p.size, m, el.props.bold);
+    var bi = bilingualMetrics(el.props.textZh, el.props.textEn, p.size, m, el.props.bold, p.size);
     bi.pad = p;
     bi.textW = bi.width;
     bi.width = bi.width + p.l + p.r;
@@ -163,63 +181,52 @@
     var p = contentBox(el.props.padding, h);
     var size = p.size * NUM_FONT_RATIO;
     var text = String(el.props.text == null ? '' : el.props.text);
-    var base = p.t + p.size * NUM_BASE_RATIO;
-    if (text.length < 2) {
-      // 单位数：保持居中于自身宽度的原有排版
-      var w = m(text, Core.FONT_NUM, 400, size);
-      return {
-        pad: p, fontSize: size, textW: w,
-        digits: text ? [{ ch: text, x: w / 2 }] : [],
-        base: base,
-        width: w + p.l + p.r,
-      };
-    }
-    // 多位数：与数字线路同一套 digitLayout 紧排中段（「1」不再因字距显得松散）；
-    // 首末数字保留各自字形的字距边距——盒边距与单位数一致，不随位数变化
-    var layout = digitLayout(text, p.size, size, m);
-    var firstInk = m.ink(text.charAt(0), Core.FONT_NUM, 400, size);
-    var shift = -firstInk.abl - layout.margin;    // 首位墨区从基准边距 M 移至首位字距边距
-    var digits = layout.digits.map(function (d) {
-      return { ch: d.ch, x: d.x + shift };
-    });
-    var lastInk = m.ink(text.charAt(text.length - 1), Core.FONT_NUM, 400, size);
-    var textW = digits[digits.length - 1].x + lastInk.adv / 2;   // 末位前进盒右缘
+    // 垂直解剖锚定：数字墨区顶（cap 顶）= 内容顶 + 顶部引导（与双语文本墨区顶统一）
+    var base = p.t + INK_TOP_LEADING * p.size + NUM_ASC * size;
+    var t = inkTextLayout(text, p.size, size, m, Core.FONT_NUM, 'lsb');
     return {
-      pad: p, fontSize: size, textW: textW,
-      digits: digits,
+      pad: p, fontSize: size, textW: t.textW,
+      digits: t.chars,
       base: base,
-      width: textW + p.l + p.r,
+      width: t.textW + p.l + p.r,
     };
   }
 
   /**
    * 数字组墨区布局：所有间距按字形墨区（而非等宽字距）计算，视觉节奏一致。
    * - 首位墨区左缘锚定在基准墨边距 M（参考数字「3」在单位数槽位中的自然墨边距，
-   *   即 (s − adv₃)/2 + lsb₃），任意线路号与色条的视觉间距一致 ——「1」墨区窄，
-   *   不再因字距居中而显得离色条更远；
+   *   即 (s − adv₃)/2 + lsb₃），任意线路号与色条（或标签）的视觉间距一致——
+   *   「1」墨区窄，不再因字距居中而显得离色条更远；
    * - 相邻数字的墨区间距固定为 g = lsb₃ + rsb₃（「1」不再需要特殊削减规则）；
    * - 槽位 advance = 末位墨区右缘 + M，右侧留白与左侧对称。
-   * 单位数字仍居中于 0.5s（光学居中）。返回 { digits:[{ch,x}], advance }，
-   * x 相对色条右缘，配合 text-anchor=middle。
+   * 单位数字同样两侧各留 M（即"只有一位数字的运行"）——「1」与色条、与「号线」
+   * 标签的间距不随位数变化。返回 { digits:[{ch,x}], advance }，
+   * x 相对色条右缘（或编号盒左缘），配合 text-anchor=middle。
    */
-  function digitLayout(num, s, fontSize, m) {
+  function digitLayout(num, s, fontSize, m, font) {
+    font = font || Core.FONT_NUM;
     var chars = num.split('');
     if (chars.length < 2) {
       if (chars.length === 0) return { digits: [], advance: s, margin: 0 };
-      var ink = m.ink(chars[0], Core.FONT_NUM, 400, fontSize);
+      // 单位数字 = 只有一位数字的运行：墨区左右两侧各留基准墨边距 M（按「3」校准），
+      // 与多位的首位/末位完全一致——「1」与色条、与「号线」标签的间距不随位数变化
+      // （旧的光学居中使「1」的两侧间距与两位数不一致）
+      var ink = m.ink(chars[0], font, 400, fontSize);
+      var ref = m.ink('3', font, 400, fontSize);
+      var margin = (s - ref.adv) / 2 - ref.abl;
+      var inkW = ink.abr + ink.abl;
       return {
-        digits: [{ ch: chars[0], x: s * 0.5 }],
-        advance: s,
-        // 单位数字槽内居中的墨边距 = 左对齐时色块与数字的视觉间距
-        margin: (s - ink.adv) / 2 - ink.abl,
+        digits: [{ ch: chars[0], x: margin + ink.adv / 2 + ink.abl }],
+        advance: margin * 2 + inkW,
+        margin: margin,
       };
     }
-    var ref = m.ink('3', Core.FONT_NUM, 400, fontSize);
+    var ref = m.ink('3', font, 400, fontSize);
     var margin = (s - ref.adv) / 2 - ref.abl;   // (s−adv₃)/2 + lsb₃
     var gap = (-ref.abl) + (ref.adv - ref.abr); // lsb₃ + rsb₃
     var inkLeft = margin;
     var digits = chars.map(function (ch) {
-      var ink = m.ink(ch, Core.FONT_NUM, 400, fontSize);
+      var ink = m.ink(ch, font, 400, fontSize);
       var x = inkLeft + ink.adv / 2 + ink.abl;  // 墨左缘 → anchor=middle 绘制点
       inkLeft += (ink.abr + ink.abl) + gap;     // 墨宽 + 固定墨区间距
       return { ch: ch, x: x };
@@ -227,21 +234,53 @@
     return { digits: digits, advance: inkLeft - gap + margin, margin: margin };
   }
 
+  /**
+   * 墨区文本排版（大数字策略，全文本类元素共用）：
+   * 多位文本逐字按墨区间距 g 紧排；单字符按自身前进宽居中。
+   * edge='lsb'：首位墨区锚定自身字距边距 lsb、末位保留字距右缘——独立文本
+   *   （大数字/编号/文本线路大字），盒边距不随内容变化；
+   * edge='margin'：首位/末位墨区各留基准墨边距 M（紧贴色条等实体对象）——数字线路。
+   * font 为测量/绘制字体栈（数字用 FONT_NUM，中文用 FONT_ZH）。
+   * 返回 { chars:[{ch,x}], textW, margin }，x 相对文本盒左缘。
+   */
+  function inkTextLayout(text, slotSize, fontSize, m, font, edge) {
+    if (!text) {
+      return { chars: [], textW: edge === 'margin' ? slotSize : 0, margin: 0 };
+    }
+    if (text.length === 1 && edge !== 'margin') {
+      var wOnly = m(text, font, 400, fontSize);
+      return { chars: [{ ch: text, x: wOnly / 2 }], textW: wOnly, margin: 0 };
+    }
+    var layout = digitLayout(text, slotSize, fontSize, m, font);
+    if (edge === 'margin') {
+      return { chars: layout.digits, textW: layout.advance, margin: layout.margin };
+    }
+    var firstInk = m.ink(text.charAt(0), font, 400, fontSize);
+    var shift = -firstInk.abl - layout.margin;
+    var chars = layout.digits.map(function (d) { return { ch: d.ch, x: d.x + shift }; });
+    var lastInk = m.ink(text.charAt(text.length - 1), font, 400, fontSize);
+    return {
+      chars: chars,
+      textW: chars[chars.length - 1].x + lastInk.adv / 2, // 末位前进盒右缘
+      margin: layout.margin,
+    };
+  }
+
   function numberLineMetrics(el, h, m) {
     var p = contentBox(el.props.padding, h);
     var s = p.size;
     var stripeW = s * STRIPE_RATIO;
-    var label = bilingualMetrics('号线', 'Line', s * LABEL_BOX_RATIO, m, false);
+    var label = bilingualMetrics('号线', 'Line', s * LABEL_BOX_RATIO, m, false, s);
     var labelTop = p.t + label.zhBase - label.zhAscent; // 「号线」墨区顶
     var right = el.props.align === 'right';
     // 右对齐仅渲染第 1 条线路（现实导视中右置牌均为单线路）；数据保留，切回左对齐恢复
     var lines = right ? (el.props.lines || []).slice(0, 1) : (el.props.lines || []);
     var layouts = lines.map(function (line) {
       var num = String(line.number || '');
-      var layout = digitLayout(num, s, s * NUM_FONT_RATIO, m);
+      var t = inkTextLayout(num, s, s * NUM_FONT_RATIO, m, Core.FONT_NUM, 'margin');
       return {
-        num: num, color: line.color, digits: layout.digits, advance: layout.advance,
-        margin: layout.margin,
+        num: num, color: line.color, digits: t.chars, advance: t.textW,
+        margin: t.margin,
         base: labelTop + m.ascent(num, Core.FONT_NUM, 400, s * NUM_FONT_RATIO),
       };
     });
@@ -297,18 +336,20 @@
     var gap = s / 8;                            // 大字两侧等距：色条→字 = 字→标签
     var right = el.props.align === 'right';     // 内容右对齐：色块移至右缘（镜像排版）
     var labelAlign = right ? 'right' : 'left';
-    var stripeX, labelX, textCenterX, width;
+    var stripeX, labelX, textX, width;
     if (el.props.nameSink !== false) {          // 缺省视为开启（历史数据兼容）
       var fontSize = s;                         // 与数字线路的数字同视觉高度
-      var textW = m(el.props.text, Core.FONT_ZH, 400, fontSize);
-      var label = bilingualMetrics('线', el.props.textEn, s * LABEL_BOX_RATIO, m, false);
+      var textT = inkTextLayout(el.props.text, s, fontSize, m, Core.FONT_ZH, 'lsb');
+      var textW = textT.textW;
+      var textChars = textT.chars;
+      var label = bilingualMetrics('线', el.props.textEn, s * LABEL_BOX_RATIO, m, false, s);
       if (right) {
-        textCenterX = p.l + textW / 2;          // 大字移到内容左缘
+        textX = p.l;                            // 大字墨区左缘贴内容左缘（逐字墨区排版）
         labelX = p.l + textW + gap;
         stripeX = labelX + label.width + gap;   // 色块移至右缘
         width = stripeX + stripeW + p.r;
       } else {
-        textCenterX = p.l + stripeW + gap + textW / 2;
+        textX = p.l + stripeW + gap;            // 大字逐字墨区排版，盒左缘 = 色条 + gap
         labelX = p.l + stripeW + gap + textW + gap;
         stripeX = p.l;
         width = p.l + stripeW + gap + textW + gap + label.width + p.r;
@@ -319,14 +360,14 @@
         fontSize: fontSize, textW: textW,
         // 大字墨区顶与「线」标签墨区顶齐平（数字线路同理）
         base: p.t + label.zhBase - label.zhAscent + m.ascent(el.props.text, Core.FONT_ZH, 400, fontSize),
-        textCenterX: textCenterX,
+        textX: textX, textChars: textChars,
         gap: gap, label: label, labelX: labelX, labelAlign: labelAlign,
         width: width,
       };
     }
     // 平铺：完整线路名与「线 / 英文名」标签同字号（同一双语标签排版，盒高 0.75s），
     // 英文在下，中文显示输入全文
-    var flat = bilingualMetrics(el.props.text, el.props.textEn, s * LABEL_BOX_RATIO, m, false);
+    var flat = bilingualMetrics(el.props.text, el.props.textEn, s * LABEL_BOX_RATIO, m, false, s);
     if (right) {
       labelX = p.l;                             // 完整线路名贴内容左缘
       stripeX = labelX + flat.width + gap;
@@ -348,17 +389,23 @@
     var p = contentBox(el.props.padding, h);
     var s = p.size;
     var size = s * NUM_FONT_RATIO;
-    var codeW = m(el.props.code, Core.FONT_NUM, 400, size);
+    var code = String(el.props.code == null ? '' : el.props.code);
     var gap = s / 8;
-    var label = bilingualMetrics(labelZh, labelEn, s * LABEL_BOX_RATIO, m, false);
+    var label = bilingualMetrics(labelZh, labelEn, s * LABEL_BOX_RATIO, m, false, s);
     var right = alignable && el.props.align === 'right';
     // 编号基线公式两种模式一致（内容对齐仅镜像水平次序）
-    var codeBase = p.t + label.zhBase - label.zhAscent + m.ascent(el.props.code, Core.FONT_NUM, 400, size);
+    var codeBase = p.t + label.zhBase - label.zhAscent + m.ascent(code, Core.FONT_NUM, 400, size);
+    // 编号墨区排版：与大数字同一策略（inkTextLayout，见其注释）
+    var codeT = inkTextLayout(code, s, size, m, Core.FONT_NUM, 'lsb');
+    var codeChars = codeT.chars;
+    var codeW = codeT.textW;
     if (right) {
+      var rightCodeX = p.l + label.width + gap;
       return {
         pad: p, size: s, codeSize: size, codeW: codeW,
         codeBase: codeBase,
-        codeCenterX: p.l + label.width + gap + codeW / 2, // 编号移至标签右侧
+        codeCenterX: rightCodeX + codeW / 2, // 编号移至标签右侧
+        codeChars: codeChars, codeX: rightCodeX,
         gap: gap, label: label, labelX: p.l, labelAlign: 'right',
         width: p.l + label.width + gap + codeW + p.r,
       };
@@ -367,6 +414,7 @@
       pad: p, size: s, codeSize: size, codeW: codeW,
       codeBase: codeBase,
       codeCenterX: p.l + codeW / 2,
+      codeChars: codeChars, codeX: p.l,
       gap: gap, label: label, labelX: p.l + codeW + gap, labelAlign: 'left',
       width: p.l + codeW + gap + label.width + p.r,
     };
@@ -612,22 +660,35 @@
         el.props.textColor, mt.labelAlign, 0);
       return;
     }
-    // 大字（思源黑体）占据数字线路中数字的位置，用文字颜色而非色条对比色
-    g.appendChild(mkText(el.props.text, {
-      x: mt.textCenterX, y: mt.base,
-      'text-anchor': 'middle',
-      'font-family': Core.FONT_ZH, 'font-size': mt.fontSize,
-      fill: el.props.textColor,
-    }));
+    // 大字（思源黑体）逐字墨区排版，用文字颜色而非色条对比色
+    mt.textChars.forEach(function (d) {
+      g.appendChild(mkText(d.ch, {
+        x: mt.textX + d.x, y: mt.base,
+        'text-anchor': 'middle',
+        'font-family': Core.FONT_ZH, 'font-size': mt.fontSize,
+        fill: el.props.textColor,
+      }));
+    });
     drawBilingualBox(g, '线', el.props.textEn, mt.label, mt.labelX, mt.pad.t, el.props.textColor, mt.labelAlign, 0);
   }
 
   function drawCodeLabel(g, el, mt, labelZh, labelEn) {
-    g.appendChild(mkText(el.props.code, {
-      x: mt.codeCenterX, y: mt.codeBase,
-      'text-anchor': 'middle',
-      'font-family': Core.FONT_NUM, 'font-size': mt.codeSize, fill: el.props.color,
-    }));
+    // 多位编号逐字按墨区坐标绘制；单字符整串居中
+    if (mt.codeChars.length) {
+      mt.codeChars.forEach(function (d) {
+        g.appendChild(mkText(d.ch, {
+          x: mt.codeX + d.x, y: mt.codeBase,
+          'text-anchor': 'middle',
+          'font-family': Core.FONT_NUM, 'font-size': mt.codeSize, fill: el.props.color,
+        }));
+      });
+    } else {
+      g.appendChild(mkText(el.props.code, {
+        x: mt.codeCenterX, y: mt.codeBase,
+        'text-anchor': 'middle',
+        'font-family': Core.FONT_NUM, 'font-size': mt.codeSize, fill: el.props.color,
+      }));
+    }
     drawBilingualBox(g, labelZh, labelEn, mt.label, mt.labelX, mt.pad.t, el.props.color, mt.labelAlign, 0);
   }
 
@@ -770,10 +831,15 @@
   global.SignRender = {
     ZH_FONT_RATIO: ZH_FONT_RATIO,
     EN_FONT_RATIO: EN_FONT_RATIO,
-    ZH_BASE_RATIO: ZH_BASE_RATIO,
-    EN_BASE_RATIO: EN_BASE_RATIO,
     NUM_FONT_RATIO: NUM_FONT_RATIO,
-    NUM_BASE_RATIO: NUM_BASE_RATIO,
+    INK_TOP_LEADING: INK_TOP_LEADING,
+    CJK_ASC: CJK_ASC,
+    CJK_DESC: CJK_DESC,
+    CJK_FACE: CJK_FACE,
+    EN_CAP: EN_CAP,
+    EN_DESC: EN_DESC,
+    ZH_EN_GAP: ZH_EN_GAP,
+    NUM_ASC: NUM_ASC,
     STRIPE_RATIO: STRIPE_RATIO,
     contentBox: contentBox,
     arrowGeometry: arrowGeometry,

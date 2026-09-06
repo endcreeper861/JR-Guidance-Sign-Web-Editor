@@ -174,7 +174,8 @@
 
   var FONT_ZH = "'Source Han Sans SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif";
   var FONT_EN = "'Helvetica', 'Frutiger', Arial, sans-serif";
-  var FONT_NUM = "'Frutiger', 'Helvetica', Arial, sans-serif";
+  // 数字/西文栈：Frutiger 优先；无 CJK 字形，中文经栈回退到思源黑体（大数字等元素的中文）
+  var FONT_NUM = "'Frutiger', 'Helvetica', 'Source Han Sans SC', Arial, sans-serif";
   var FONT_NUM_CONDENSED = "'Frutiger Condensed', 'Frutiger', Arial, sans-serif";
 
   // 字体度量（hhea ascent / em，从字体文件提取，用于基线定位）
@@ -298,6 +299,14 @@
       var tm = ctx.measureText(text);
       var a = tm.actualBoundingBoxAscent;
       return Math.ceil(typeof a === 'number' && a > 0 ? a : sizePx * 0.75);
+    };
+    /** 墨区下伸（基线以下的墨区深度，实际墨区测量） */
+    measure.descent = function (text, family, weight, sizePx) {
+      if (!text) return 0;
+      ctx.font = weight + ' ' + sizePx + 'px ' + family;
+      var tm = ctx.measureText(text);
+      var d = tm.actualBoundingBoxDescent;
+      return typeof d === 'number' ? d : sizePx * 0.2;
     };
     /**
      * 墨区度量：abl/abr 为墨区相对原点的左/右缘（abl 向左为正，数字通常为负 = 左字肩），

@@ -110,8 +110,55 @@
       });
     });
 
-    test('NumberLine 渲染：色条 rect + 数字 text + 号线/Line 标签', function () {
-      var el = SignState.createElement('number-line', {
+    test('NumberLine 单位/首位「1」到色条的间距恒定（真实字体回归）', function () {
+      function firstGap(number) {
+        var el = SignState.createElement('number-line', {
+          lines: [{ number: number, color: '#E4002B' }],
+        });
+        var r = SignRender.renderElement(el, 256, measure);
+        fixture.appendChild(r.node);
+        var stripe = r.node.querySelector('rect');
+        var texts = r.node.querySelectorAll('text');
+        var fontSize = 256 * 0.6 * 1.3;
+        var ctx = document.createElement('canvas').getContext('2d');
+        ctx.font = '400 ' + fontSize + 'px ' + SignCore.FONT_NUM;
+        var tm = ctx.measureText(texts[0].textContent);
+        var inkLeft = parseFloat(texts[0].getAttribute('x')) - tm.width / 2 - tm.actualBoundingBoxLeft;
+        var gap = inkLeft - (parseFloat(stripe.getAttribute('x')) + parseFloat(stripe.getAttribute('width')));
+        fixture.removeChild(r.node);
+        return gap;
+      }
+      var gapSingle = firstGap('1');
+      var gapDouble = firstGap('11');
+      assert(Math.abs(gapSingle - gapDouble) < 1.5,
+        '「1」到色条间距应恒定：单位 ' + gapSingle + ' vs 两位 ' + gapDouble);
+      // 右缘对称：「1」墨区右缘 → 「号线」标签左缘的间距同样不随位数变化
+      function labelGapOf(number) {
+        var el = SignState.createElement('number-line', {
+          lines: [{ number: number, color: '#E4002B' }],
+        });
+        var mt = SignRender.elementMetrics(el, 256, measure);
+        var r = SignRender.renderElement(el, 256, measure);
+        fixture.appendChild(r.node);
+        var texts = r.node.querySelectorAll('text');
+        var fontSize = 256 * 0.6 * 1.3;
+        var ctx = document.createElement('canvas').getContext('2d');
+        ctx.font = '400 ' + fontSize + 'px ' + SignCore.FONT_NUM;
+        var last = texts[texts.length - 3] || texts[0]; // 最后一个数字 text（跳过 号线/Line）
+        var tm = ctx.measureText(last.textContent);
+        var inkRight = parseFloat(last.getAttribute('x')) - tm.width / 2 + tm.actualBoundingBoxRight;
+        var label = Array.prototype.find.call(texts, function (t) { return t.textContent === '号线'; });
+        var labelInkLeft = parseFloat(label.getAttribute('x')); // 号线 text 默认起点锚定
+        fixture.removeChild(r.node);
+        return labelInkLeft - inkRight;
+      }
+      var lgSingle = labelGapOf('1');
+      var lgDouble = labelGapOf('11');
+      assert(Math.abs(lgSingle - lgDouble) < 1.5,
+        '「1」到「号线」间距应恒定：单位 ' + lgSingle + ' vs 两位 ' + lgDouble);
+    });
+
+    test('NumberLine 渲染：色条 rect + 数字 text + 号线/Line 标签', function () {      var el = SignState.createElement('number-line', {
         lines: [{ number: '3', color: '#FCD600' }, { number: '14', color: '#626020' }, { number: '22', color: '#871C2B' }],
       });
       var r = SignRender.renderElement(el, 256, measure);

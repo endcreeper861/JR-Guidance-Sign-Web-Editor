@@ -39,7 +39,8 @@ core.js → icons.js → state.js → render.js → ui.js → presets.js
 
 ### 排版关键点
 
-- **墨区度量**（core.js `measure.ink` / `measure.ascent`）：基于 canvas `actualBoundingBoxLeft/Right/Ascent`。数字线路的多位排版（`digitLayout`）全部按墨区：首位墨左锚定基准边距 `M=(s−adv₃)/2+lsb₃`、相邻墨区间距 `g=lsb₃+rsb₃`、右侧留白 M——「1」等窄字与其他数字视觉间距一致。数字基线 = 「号线」标签墨区顶 + 自身墨区上升高（顶对齐）。
+- **墨区度量**（core.js `measure.ink` / `measure.ascent` / `measure.descent`）：基于 canvas `actualBoundingBox*`。数字线路的多位排版（`digitLayout`）全部按墨区：首位墨左锚定基准边距 `M=(s−adv₃)/2+lsb₃`、相邻墨区间距 `g=lsb₃+rsb₃`、右侧留白 M——「1」等窄字与其他数字视觉间距一致。数字基线 = 「号线」标签墨区顶 + 自身墨区上升高（顶对齐）。所有文本类元素的大文本统一经 `inkTextLayout`（大数字策略）排版：多位文本逐字按墨区间距 g 紧排（任意相邻字符间保持 g，混排不重叠），单字符按自身前进宽居中。两种边缘锚定由调用方选择——`edge='lsb'`（首位墨区锚自身字距边距 lsb，独立文本：大数字/编号/文本线路大字）、`edge='margin'`（首位/末位各留基准墨边距 M，紧贴色条：数字线路）。`digitLayout` 为其底层（带字体参数）；FONT_NUM 栈末尾含思源黑体，大数字等元素的中文经栈回退以思源渲染（数字/拉丁仍为 Frutiger）。
+- **垂直解剖锚定**（render.js 排版解剖常数）：全文本类元素的**首行墨区顶**统一为 `内容顶 + INK_TOP_LEADING(0.036)×s`，基线 = 墨区顶 + 各自上伸部（中文 CJK_ASC 0.84、英文 cap EN_CAP 0.72、数字 NUM_ASC 0.70，均实测）。双语元素的中文字号 = 字面高意图(0.58s) ÷ 思源墨高比(0.92)（与 506/800 恒等）；同顶内边距 ⇒ 各类型墨区顶齐平（F2）。
 - **双语文本对齐**（`bilingualAlignX`）：对齐基准是纯文本区宽度（metrics 的 `textW`），不是含 padding 的元素宽度；英文左右对齐带 `s/30` 光学缩进（移植自参考实现）。
 - **箭头**（兼容保留的类型）：8 方向。斜向 = 轴向基底在 `√2s − t` 长的虚拟盒内构建后旋转 ±45°，箭尖锚在盒角、几何不越界；箭柄为四点多边形。
 - **图标**：嵌套 `<svg viewBox>` 缩放到内容盒，`fill="black"` 替换为元素颜色（白色保留，tile 风格图标换色正确）。不依赖字体，导出自包含。

@@ -652,7 +652,10 @@
       }
       var cb = $$('#right-panel-body input[type="checkbox"]')[0];
       ok('S24 下沉复选框默认勾选', !!cb && cb.checked);
-      ok('S24 下沉渲染含「线」后缀', texts().length === 3, 'n=' + texts().length);
+      // 沉排大字逐字绘制：字符数 + 「线」+ 英文名
+      ok('S24 下沉渲染含「线」后缀', texts().length === 7 &&
+        Array.prototype.some.call(texts(), t => t.textContent === '线'),
+        'n=' + texts().length);
       cb.click();
       var st = S.findElement(w.App.state, el.id).element;
       ok('S24 关闭后状态 nameSink=false', st.props.nameSink === false);
@@ -664,7 +667,7 @@
       cb.click();
       st = S.findElement(w.App.state, el.id).element;
       ok('S24 重新勾选恢复大字渲染',
-        st.props.nameSink === true && texts().length === 3, 'n=' + texts().length);
+        st.props.nameSink === true && texts().length === 7, 'n=' + texts().length);
       w.App.select(null);
     }
 
