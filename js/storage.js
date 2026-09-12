@@ -115,13 +115,27 @@
 
   function startHeartbeat() {
     heartbeatTimer = setInterval(writeInstance, HEARTBEAT_MS);
-    window.addEventListener('beforeunload', function () {
-      clearInterval(heartbeatTimer);
-      var cur = readInstance();
-      if (cur && cur.id === instanceId) {
-        localStorage.removeItem(INSTANCE_KEY);
+    window.addEventListener('beforeunload', releaseInstance);
+    window.addEventListener('pagehide', releaseInstance);
+    // 移动端切后台不触发 beforeunload：页面隐藏时停心跳并释放实例标记
+    // （后台挂起的心跳定时器被节流，留着只会误拦自己）；回前台立即重写并恢复。
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') {
+        releaseInstance();
+      } else if (heartbeatTimer === null && instanceId) {
+        heartbeatTimer = setInterval(writeInstance, HEARTBEAT_MS);
+        writeInstance();
       }
     });
+  }
+
+  function releaseInstance() {
+    clearInterval(heartbeatTimer);
+    heartbeatTimer = null;
+    var cur = readInstance();
+    if (cur && cur.id === instanceId) {
+      localStorage.removeItem(INSTANCE_KEY);
+    }
   }
 
   // ─── 项目 JSON 导入导出 ────────────────────────────────────

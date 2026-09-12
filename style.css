@@ -205,6 +205,7 @@ input, select {
   border-radius: 4px;
   overflow: visible; /* 行手柄悬于外侧 */
   user-select: none;
+  -webkit-touch-callout: none; /* iOS 长按不呼出系统菜单 */
 }
 
 #sign-svg {
@@ -239,6 +240,8 @@ input, select {
   cursor: grab;
   pointer-events: auto;
   user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none; /* 触屏行手柄拖拽不触发页面滚动 */
   opacity: 0;
   transition: opacity 0.12s ease;
 }
@@ -252,6 +255,7 @@ input, select {
   display: flex;
   gap: 6px;
   pointer-events: auto;
+  touch-action: manipulation; /* 触屏点按钮去掉双击缩放延迟 */
   opacity: 0;
   transition: opacity 0.12s ease;
 }
@@ -323,6 +327,7 @@ input, select {
   stroke: transparent;
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
+  touch-action: none; /* 触屏按住元素拖拽时不触发页面滚动 */
 }
 .element:hover .hitbox { stroke: rgba(37, 99, 235, 0.45); }
 .element.selected .hitbox {
@@ -404,6 +409,9 @@ input, select {
   align-items: center;
   gap: 6px;
   cursor: grab;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation; /* 触屏点卡片去掉双击缩放延迟 */
   transition: border-color 0.12s ease, box-shadow 0.12s ease, transform 0.1s ease;
 }
 .palette-card:hover {
@@ -445,6 +453,9 @@ input, select {
   background: #fafbfc;
   padding: 8px;
   cursor: grab;
+  user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: manipulation;
   transition: border-color 0.12s ease, box-shadow 0.12s ease;
 }
 .preset-card:hover { border-color: var(--accent); box-shadow: 0 2px 10px rgba(37, 99, 235, 0.14); }
@@ -877,3 +888,212 @@ input[type="range"] { width: 100%; accent-color: var(--accent); }
 
 .test-pass { color: var(--ok); }
 .test-fail { color: var(--danger); }
+
+/* ═══ 移动端适配（≤768px 纵向三段式）═══ */
+
+/* 顶部选择器：分类 chip 行（仅移动 palette 分支生成这些节点） */
+
+.palette-chips {
+  display: flex;
+  gap: 6px;
+  padding: 8px 10px 6px;
+  overflow-x: auto;
+  touch-action: pan-x; /* 横向滚动交给浏览器，同时屏蔽页面捏合/双击缩放 */
+  scrollbar-width: none;
+}
+.palette-chips::-webkit-scrollbar { display: none; }
+.palette-chip {
+  flex: none;
+  padding: 7px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.palette-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* 当前分类的横向卡片条 */
+
+.palette-strip {
+  display: flex;
+  gap: 8px;
+  padding: 2px 10px 10px;
+  overflow-x: auto;
+  touch-action: pan-x;
+  scrollbar-width: none;
+}
+.palette-strip::-webkit-scrollbar { display: none; }
+.palette-strip .palette-card,
+.palette-strip .preset-card { flex: none; }
+.palette-strip .palette-card { width: 88px; }
+.palette-strip .preset-card { width: 150px; }
+.palette-strip .palette-empty { flex: 1; }
+
+/* 画布缩放徽标（仅移动布局显示，interact.js 更新倍率文案） */
+
+#zoom-badge {
+  display: none;
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 40;
+  padding: 6px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--text-dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 1px 6px rgba(15, 25, 40, 0.12);
+}
+
+@media (max-width: 768px) {
+  #app {
+    flex-direction: column; /* DOM 顺序 left→center→right 天然成立 */
+    height: 100vh;
+    height: 100dvh; /* iOS 地址栏/键盘引起的 vh 跳动由 dvh 修正（旧系统回退 vh） */
+  }
+
+  /* 顶部：元素选择器横条 */
+  #left-panel {
+    flex: none;
+    width: 100%;
+    min-width: 0;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  #left-panel .panel-header { display: none; }
+  #left-panel .panel-body {
+    flex: none;
+    overflow: visible;
+    padding: 0;
+  }
+
+  /* 中部：画布。touch-action:none 把原生滚动交给 interact.js 的手势层
+     （单指平移 / pinch 缩放 / 双击复位），鼠标滚轮不受影响 */
+  #canvas-scroll {
+    padding: 12px;
+    touch-action: none;
+  }
+
+  /* 底部：属性带（40vh，可折叠成 48px 只留标题行） */
+  #right-panel {
+    flex: none;
+    width: 100%;
+    min-width: 0;
+    height: 40vh;
+    border-right: none;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    transition: height 0.2s ease;
+  }
+  #right-panel.band-collapsed { height: 48px; }
+  #right-panel.band-collapsed .panel-body { display: none; }
+  #right-panel .panel-body { touch-action: pan-y; }
+  /* 折叠把手箭头转向：⟩ 旋成 ∨（折叠）/ ∧（展开） */
+  #right-panel #right-collapse { transform: rotate(90deg); }
+  #right-panel.band-collapsed #right-collapse { transform: rotate(-90deg); }
+
+  /* 桌面侧栏收展件在移动端无意义（跨断点时 main.js 同步清理状态类） */
+  #left-expander, #right-expander { display: none !important; }
+
+  /* 触控目标放大 */
+  .icon-btn { width: 44px; height: 44px; }
+  .seg-group button { padding: 10px 0; }
+  input[type="checkbox"] { width: 20px; height: 20px; }
+  .btn { padding: 11px 10px; }
+  button { touch-action: manipulation; }
+
+  #empty-hint { font-size: 15px; letter-spacing: 1px; padding: 0 16px; text-align: center; }
+
+  /* 移到底部属性带上方居中（折叠成 48px 时由 main.js 精确同步偏移） */
+  #toasts {
+    top: auto;
+    bottom: calc(40vh + 14px);
+    left: 12px;
+    right: 12px;
+    align-items: center;
+  }
+
+  #zoom-badge { display: inline-flex; }
+}
+
+/* ─── 无悬停设备（触屏）：行手柄/行按钮常显 ───
+   独立于断点：宽视口平板同样适用；桌面 hover 规则原样保留（hover:none
+   只在无悬停能力的设备上命中，不会覆盖桌面） */
+
+@media (hover: none) {
+  .row-band .row-handle {
+    left: 8px; /* 从画布外 -38px 内移到行带内缘，悬于内容上层 */
+    opacity: 1;
+    width: 44px; height: 44px; /* 触控目标 ≥44px */
+    background: rgba(255, 255, 255, 0.72); /* 半透明底，内容透出 */
+    box-shadow: 0 1px 4px rgba(15, 25, 40, 0.14);
+  }
+  .row-band .row-actions { opacity: 1; }
+  .row-band .row-actions button {
+    height: 44px;
+    padding: 0 12px;
+    background: rgba(255, 255, 255, 0.88);
+  }
+}
+
+/* ─── 移动端行管理条：行控件移出牌面（行内悬浮会与元素互相叠加）───
+   ≤768px 时行带内不渲染任何控件（interact.js 分流），改由牌面下方
+   #row-strip 按行出芯片：▲▼ 调序 / 存预设 / 删行。置于 hover:none
+   块之后，display:none 赢得同特异级联。 */
+
+#row-strip { display: none; }
+
+@media (max-width: 768px) {
+  #row-strip {
+    display: flex;
+    align-self: stretch;
+    gap: 8px;
+    padding: 10px 12px 0;
+    overflow-x: auto;
+    touch-action: pan-x;
+    scrollbar-width: none;
+  }
+  #row-strip::-webkit-scrollbar { display: none; }
+
+  .row-strip-chip {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: #fff;
+  }
+  .row-strip-chip .rs-label {
+    font-size: 12px;
+    color: var(--text-dim);
+    padding: 0 4px 0 6px;
+    white-space: nowrap;
+  }
+  .row-strip-chip .rs-btn {
+    min-width: 44px;
+    height: 40px;
+    padding: 0 10px;
+    border-radius: 7px;
+    font-size: 13px;
+    color: var(--text-dim);
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+  .row-strip-chip .rs-btn:disabled { opacity: 0.35; }
+  .row-strip-chip .rs-btn:active { background: var(--accent-soft); color: var(--accent); }
+  .row-strip-chip .rs-danger:active { background: rgba(220, 38, 38, 0.12); color: var(--danger); }
+
+  /* 行带内控件一律不显示（行条已接管） */
+  .row-band .row-handle,
+  .row-band .row-actions { display: none; }
+}

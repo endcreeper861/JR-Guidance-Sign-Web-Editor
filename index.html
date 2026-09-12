@@ -39,9 +39,13 @@
             </div>
             <div id="empty-hint" hidden>从左侧拖放元素到此处开始编辑</div>
           </div>
+          <!-- 移动端行管理条：interact.js 填充（行控件外置，不与牌面元素叠加） -->
+          <div id="row-strip"></div>
           <button id="add-row-btn" title="在底部添加新行">＋ 添加行</button>
         </div>
       </div>
+      <!-- 画布缩放徽标：仅移动布局显示，interact.js 更新倍率并接线复位 -->
+      <button id="zoom-badge" title="当前缩放，点按复位">100%</button>
     </main>
 
     <!-- ══ 右栏：属性 / 导出 ══ -->

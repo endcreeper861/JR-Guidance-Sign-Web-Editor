@@ -103,56 +103,126 @@
   function setDragPayload(ev, payload) {
     var mime = payload.kind === 'preset' ? SignInteract.MIME_PRESET : SignInteract.MIME_NEW;
     var json = JSON.stringify(payload);
-    try { ev.dataTransfer.setData(mime, json); } catch (e) { /* 部分浏览器仅支持标准 MIME */ }
-    ev.dataTransfer.setData('text/plain', json);
+    try {
+      ev.dataTransfer.setData(mime, json);
+      ev.dataTransfer.setData('text/plain', json);
+    } catch (e) { /* 部分浏览器仅支持标准 MIME */ }
     ev.dataTransfer.effectAllowed = 'copy';
+  }
+
+  /** 移动端禁用卡片 HTML5 拖拽：触屏长按会唤起原生拖拽会话（卡片置灰、页面卡住收不了场） */
+  function cardDraggableAttr() {
+    return App.isMobileView && App.isMobileView() ? 'false' : 'true';
+  }
+
+  function wireCardDrag(card, payload) {
+    card.addEventListener('dragstart', function (ev) {
+      if (App.isMobileView && App.isMobileView()) {
+        ev.preventDefault(); // 添加只走点击；桌面保持拖入编辑区
+        return;
+      }
+      setDragPayload(ev, payload);
+      card.classList.add('dragging');
+    });
+    card.addEventListener('dragend', function () { card.classList.remove('dragging'); });
   }
 
   function buildPalette() {
     var root = document.getElementById('palette');
     root.innerHTML = '';
-
+    if (App.isMobileView && App.isMobileView()) {
+      buildPaletteMobile(root);
+      return;
+    }
     CATEGORIES.forEach(function (cat) {
-      var grid = h('div', { class: 'palette-grid' });
-      cat.items.forEach(function (item) {
-        var sample = createElementForItem(item);
-        // 空白占位无可见内容，用虚线框示意
-        var preview = itemTypeOf(item) === 'space'
-          ? spaceIcon()
-          : Render.renderElementStandalone(sample, 36, App.measure).node;
-        var card = h('div', {
-          class: 'palette-card',
-          draggable: 'true',
-          title: '点击添加到当前行，或拖入编辑区',
-        }, [
-          h('div', { class: 'card-icon' }, [preview]),
-          h('div', { class: 'card-name', text: itemDisplayName(item) }),
-        ]);
-        card.addEventListener('dragstart', function (ev) {
-          setDragPayload(ev, {
-            kind: 'new',
-            type: itemTypeOf(item),
-            props: typeof item === 'string' ? undefined : { icon: item.icon },
-          });
-          card.classList.add('dragging');
-        });
-        card.addEventListener('dragend', function () { card.classList.remove('dragging'); });
-        card.addEventListener('click', function () {
-          App.update(function (s) {
-            var rowId = targetRowId(s);
-            return State.addElement(s, rowId, createElementForItem(item));
-          });
-          SignUI.toast('已添加「' + itemDisplayName(item) + '」', 'success');
-        });
-        grid.appendChild(card);
-      });
-      root.appendChild(h('div', { class: 'palette-category' }, [
-        h('div', { class: 'palette-category-title', text: cat.name }),
-        grid,
-      ]));
+      root.appendChild(buildDesktopCategory(cat));
     });
-
     buildPresetCategory(root);
+  }
+
+  /** 移动端当前分类（chip 态，跨 palette 重建保留）；-1 = 预设 */
+  var activeCategory = 0;
+
+  /** ≤768px：顶部 chip 行（6 分类 + 预设）+ 当前分类横向卡片条 */
+  function buildPaletteMobile(root) {
+    var chips = h('div', { class: 'palette-chips' });
+    function chip(label, idx) {
+      return h('button', {
+        class: 'palette-chip' + (activeCategory === idx ? ' active' : ''),
+        text: label,
+      });
+    }
+    CATEGORIES.forEach(function (cat, i) {
+      var c = chip(cat.name, i);
+      c.addEventListener('click', function () {
+        if (activeCategory === i) return;
+        activeCategory = i;
+        buildPalette();
+      });
+      chips.appendChild(c);
+    });
+    var presetChip = chip('预设', -1);
+    presetChip.addEventListener('click', function () {
+      if (activeCategory === -1) return;
+      activeCategory = -1;
+      buildPalette();
+    });
+    chips.appendChild(presetChip);
+    root.appendChild(chips);
+
+    var strip = h('div', { class: 'palette-strip' });
+    if (activeCategory === -1) {
+      buildPresetCards().forEach(function (n) { strip.appendChild(n); });
+    } else {
+      CATEGORIES[activeCategory].items.forEach(function (item) {
+        strip.appendChild(buildItemCard(item));
+      });
+    }
+    root.appendChild(strip);
+  }
+
+  function buildDesktopCategory(cat) {
+    var grid = h('div', { class: 'palette-grid' });
+    cat.items.forEach(function (item) { grid.appendChild(buildItemCard(item)); });
+    return h('div', { class: 'palette-category' }, [
+      h('div', { class: 'palette-category-title', text: cat.name }),
+      grid,
+    ]);
+  }
+
+  /**
+   * 元素卡片：两端点击即添加（桌面不选中，移动端添加后自动选中）；
+   * 桌面另支持 HTML5 拖入编辑区。
+   */
+  function buildItemCard(item) {
+    var sample = createElementForItem(item);
+    // 空白占位无可见内容，用虚线框示意
+    var preview = itemTypeOf(item) === 'space'
+      ? spaceIcon()
+      : Render.renderElementStandalone(sample, 36, App.measure).node;
+    var card = h('div', {
+      class: 'palette-card',
+      draggable: cardDraggableAttr(),
+      title: '点击添加到当前行，或拖入编辑区',
+    }, [
+      h('div', { class: 'card-icon' }, [preview]),
+      h('div', { class: 'card-name', text: itemDisplayName(item) }),
+    ]);
+    wireCardDrag(card, {
+      kind: 'new',
+      type: itemTypeOf(item),
+      props: typeof item === 'string' ? undefined : { icon: item.icon },
+    });
+    card.addEventListener('click', function () {
+      // 先创建再入状态：id 可捕获，供移动端添加后选中
+      var created = createElementForItem(item);
+      App.update(function (s) {
+        return State.addElement(s, targetRowId(s), created);
+      });
+      if (App.isMobileView && App.isMobileView()) App.select(created.id);
+      SignUI.toast('已添加「' + itemDisplayName(item) + '」', 'success');
+    });
+    return card;
   }
 
   /** 元素点击添加时的目标行：选中元素所在行，否则最后一行 */
@@ -190,13 +260,13 @@
     return svg;
   }
 
-  function buildPresetCategory(root) {
-    var cat = h('div', { class: 'palette-category' }, [
-      h('div', { class: 'palette-category-title', text: '预设' }),
-    ]);
+  /** 预设卡片节点列表（空时为提示节点）；桌面入分类容器，移动端入横向卡片条 */
+  function buildPresetCards() {
+    var nodes = [];
     var items = Presets.list();
     if (items.length === 0) {
-      cat.appendChild(h('div', { class: 'palette-empty', text: '悬停行右上角「存为预设」可保存当前行' }));
+      nodes.push(h('div', { class: 'palette-empty', text: '悬停行右上角「存为预设」可保存当前行' }));
+      return nodes;
     }
     items.forEach(function (p) {
       var del = h('button', {
@@ -213,23 +283,27 @@
       });
       var card = h('div', {
         class: 'preset-card',
-        draggable: 'true',
+        draggable: cardDraggableAttr(),
         title: '拖入空行使用；点击预览',
       }, [
         h('div', { class: 'preset-thumb' }, [renderRowThumb(p.elements, 48)]),
         h('div', { class: 'preset-name', text: p.name }),
         del,
       ]);
-      card.addEventListener('dragstart', function (ev) {
-        setDragPayload(ev, { kind: 'preset', id: p.id });
-        card.classList.add('dragging');
-      });
-      card.addEventListener('dragend', function () { card.classList.remove('dragging'); });
+      wireCardDrag(card, { kind: 'preset', id: p.id });
       card.addEventListener('click', function () {
         App.previewPreset(p.id);
       });
-      cat.appendChild(card);
+      nodes.push(card);
     });
+    return nodes;
+  }
+
+  function buildPresetCategory(root) {
+    var cat = h('div', { class: 'palette-category' }, [
+      h('div', { class: 'palette-category-title', text: '预设' }),
+    ]);
+    buildPresetCards().forEach(function (n) { cat.appendChild(n); });
     root.appendChild(cat);
   }
 
@@ -419,6 +493,14 @@
     document.getElementById('close-element-btn').hidden = mode === 'settings';
     document.getElementById('close-element-btn').title =
       mode === 'preset' ? '关闭预览' : '关闭元素属性';
+    // 移动端：选中元素/进预览时底部属性带自动展开（折叠只由用户手动控制）
+    if (mode !== 'settings' && App.isMobileView && App.isMobileView()) {
+      var band = document.getElementById('right-panel');
+      if (band.classList.contains('band-collapsed')) {
+        band.classList.remove('band-collapsed');
+        if (App.syncMobileChrome) App.syncMobileChrome();
+      }
+    }
   }
 
   function rebuildRightPanel() {

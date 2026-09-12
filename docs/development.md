@@ -1,6 +1,6 @@
 # 开发指南
 
-面向后续开发者（含 AI 代理）的完整技术说明。领域术语见根目录 [CONTEXT.md](../CONTEXT.md)，渲染引擎选型见 [adr/0001-svg-rendering-engine.md](adr/0001-svg-rendering-engine.md)。
+面向后续开发者（含 AI 代理）的完整技术说明。领域术语见根目录 [CONTEXT.md](../CONTEXT.md)，渲染引擎选型见 [adr/0001-svg-rendering-engine.md](adr/0001-svg-rendering-engine.md)，移动端适配决策见 [adr/0002-mobile-support.md](adr/0002-mobile-support.md)。
 
 ## 总览
 
@@ -75,13 +75,25 @@ core.js → icons.js → state.js → render.js → ui.js → presets.js
 - 相邻同背景色元素的无缝：元素背景与命中框宽度向上取整、平移向下取整，边界落在整数像素上相互覆盖，消除抗锯齿透明缝。
 - 面板头部叉键等用 `hidden` 属性控制的元素，需配套显式 CSS 规则（`.icon-btn` 的 display 会覆盖 UA 的 hidden 规则），新增时同步加 `[hidden]` 样式。
 
+## 移动端适配（≤768px）
+
+断点、布局形态、Pointer 化与缩放的决策记录见 [adr/0002-mobile-support.md](adr/0002-mobile-support.md)。要点：
+
+- **判定**：`App.isMobileView()`（ui.js，`matchMedia('(max-width: 768px)')`），与 style.css 媒体查询、main.js `watchBreakpoint` 共用同一数值。断点跨越时重建 palette、复位 `canvasZoom`、互清理两端折叠态（桌面 `collapsed` ≠ 移动 `band-collapsed`）。断点检测三路兜底：mq change + window resize + `documentElement` ResizeObserver（部分嵌入环境视口变化不派发事件），共用同一幂等检查。
+- **布局**：纵向三段式——`#left-panel` 变顶部 chip 行 + 横向卡片条（panel.js `buildPaletteMobile`，`activeCategory` 为模块态跨重建保留；桌面/移动共用 `buildItemCard`/`buildPresetCards` 工厂）；`#right-panel` 变底部属性带（40vh、`.band-collapsed` 折成 48px，`#right-collapse` 兼作把手），选中元素/进预览时 syncRightPanel 自动展开。**仅移动端**点击卡片添加后自动选中新元素（创建元素移到 `App.update` 之前以捕获 id）。
+- **事件层**：拖拽（元素/行）全部 Pointer Events，会话锁定 `pointerId`（move/up/cancel 校验一致才处理）；`click` 处理器保留。触屏不在 pointerdown 上 `preventDefault`（防个别浏览器吞 click），滚动抑制靠 `touch-action`（`.hitbox`/`.row-handle` 为 none、卡片 manipulation、移动块内 `#canvas-scroll` 为 none）。**移动端禁用卡片 HTML5 拖拽**（`draggable` 按断点置 false + dragstart preventDefault，见 panel.js `wireCardDrag`）——触屏长按会唤起浏览器原生拖拽会话（卡片置灰、页面收不了场表现为卡死），添加一律走点击。
+- **行控件外置**：≤768px 行带内不渲染手柄/按钮（会与牌面元素互相叠加），改由牌面下方 `#row-strip` 行管理条承接（interact.js `renderRowStrip`，每行一枚芯片：▲▼ 按钮调序 / 存预设 / 删行）；断点切换经 `watchBreakpoint` 的 `App.renderAll()` 重渲染。
+- **手势**（interact.js 手势段，仅移动布局 + `pointerType === 'touch'`）：`#canvas-scroll` 的 `touch-action: none` 使原生滚动由手势层接管——单指空白拖动=平移（scrollLeft/Top）、双指=pinch（0.5x–4x，锚定两指中点）、空白双击=复位。冲突规则：已激活拖拽会话无视第二指；未激活会话在第二指落下时取消转 pinch。`App.canvasZoom` 是会话态（不持久化），乘进 `fitSignDisplay` 的适配宽度；缩放徽标 `#zoom-badge` 仅移动布局显示。`setPointerCapture` 到滚动容器保证手势期间 DOM 重建不丢事件（合成事件下会抛错，已 try/catch）。
+- **生命周期**：自动存档刷盘与实例心跳释放挂在 `beforeunload` + `pagehide` + `visibilitychange(hidden)`（移动端切后台不触发 beforeunload），`visible` 恢复心跳。
+- **hover 替代**：`@media (hover: none)` 下行手柄/行按钮常显、手柄内移 `left:8px`、触控目标 44px——该规则实际服务于**宽视口触屏**（如平板的桌面布局）；≤768px 移动布局行控件已外置（见上条），此块对移动端无效（移动 media 块在其后以 display:none 压制）。注意 `hover` 媒体特性反映设备输入能力——带鼠标的桌面机即使窗口 <768px 也不命中；媒体查询无法在桌面仿真验证，e2e 覆盖的是断点逻辑而非 hover:none。
+
 ## 测试约定
 
 三套互补，改动后必须全绿：
 
 1. **Node（`node --test`，test/*.mjs）**：状态模型纯函数 + render.js 纯几何。使用确定性假 measurer：`width = len×size×0.9`、`ascent = len×size×0.8`、`ink = { abl:−0.05s, abr:0.85s, adv:0.9s }`。断言按假 measurer 的公式推导。
 2. **test.html（浏览器 DOM）**：真实字体下的结构渲染、墨区级间距/对齐断言（墨区顶 = 基线 `y` 属性 − `measure.ascent`；**不能用 getBBox**——Chromium 对 `<text>` 返回行盒）、导出字符串、颜色选择器。需要 getBBox 的用例先把节点挂到 `#fixture`。
-3. **e2e.html（iframe 驱动）**：真实交互流（合成鼠标事件、DataTransfer 拖放、模态对话框），覆盖选中/拖拽排序/跨行/预设/面板回显/导出/实例守卫等，结果写 localStorage `e2e-results` 并反映在标题。
+3. **e2e.html（iframe 驱动）**：真实交互流（合成 PointerEvent 拖拽、DataTransfer 拖放、模态对话框），覆盖选中/拖拽排序/跨行/预设/面板回显/导出/实例守卫/缩放管线/pagehide 刷盘/移动壳层（S38 收窄 iframe 视口驱动 palette 分支与触屏手势）等，结果写 localStorage `e2e-results` 并反映在标题。视口切换处补发 `resize` 事件直达断点检查（嵌入浏览器 iframe 视口变化的事件派发可能被节流推迟，真实设备不受影响）。
 
 HTTP 缓存坑：改完 js 后浏览器可能仍跑旧代码（症状：失败值与修复前逐字节相同）。在页面里 `fetch(url, {cache:'reload'})` 全部改动文件后 reload。
 
