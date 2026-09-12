@@ -594,12 +594,26 @@
 
     root.appendChild(h('div', { class: 'divider' }));
     root.appendChild(h('div', { class: 'section-title', text: '导出' }));
-    root.appendChild(h('button', { class: 'btn btn-primary', text: '⬇ 导出 SVG' })).addEventListener('click', function () {
-      SignExporters.exportSVGFile(App.state, App.measure);
-    });
-    root.appendChild(h('button', { class: 'btn btn-primary', text: '⬇ 导出 PNG' })).addEventListener('click', function () {
-      SignExporters.exportPNGFile(App.state, App.measure);
-    });
+    // 导出前可能要加载内嵌字体（fonts-data.js 约 7 MB），加载期间按钮保持忙碌态，
+    // 避免慢网络下「点了没反应」；失败由导出函数 toast 错误。
+    function exportButton(text, run) {
+      var btn = h('button', { class: 'btn btn-primary', text: text });
+      btn.addEventListener('click', function () {
+        if (btn.disabled) return;
+        var original = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '⏳ 正在准备字体…';
+        function done() { btn.disabled = false; btn.textContent = original; }
+        run().then(done, done);
+      });
+      return btn;
+    }
+    root.appendChild(exportButton('⬇ 导出 SVG', function () {
+      return SignExporters.exportSVGFile(App.state, App.measure);
+    }));
+    root.appendChild(exportButton('⬇ 导出 PNG', function () {
+      return SignExporters.exportPNGFile(App.state, App.measure);
+    }));
 
     root.appendChild(h('div', { class: 'divider' }));
     root.appendChild(h('div', { class: 'section-title', text: '项目' }));

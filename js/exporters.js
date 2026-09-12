@@ -34,10 +34,14 @@
       var s = document.createElement('script');
       s.src = 'fonts-data.js';
       s.onload = function () {
-        global.SIGN_FONT_EMBED ? resolve(global.SIGN_FONT_EMBED)
-          : reject(new Error('字体内嵌数据加载失败'));
+        if (global.SIGN_FONT_EMBED) { resolve(global.SIGN_FONT_EMBED); return; }
+        fontDataPromise = null; // 允许下次导出重试，而不是永久缓存失败
+        reject(new Error('字体内嵌数据加载失败'));
       };
-      s.onerror = function () { reject(new Error('fonts-data.js 加载失败')); };
+      s.onerror = function () {
+        fontDataPromise = null; // 允许下次导出重试，而不是永久缓存失败
+        reject(new Error('fonts-data.js 加载失败'));
+      };
       document.head.appendChild(s);
     });
     return fontDataPromise;

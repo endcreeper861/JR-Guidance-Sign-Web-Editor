@@ -1122,6 +1122,34 @@
       w.App.select(null);
     }
 
+    // S35：导出按钮反馈（回归：内嵌字体加载慢时「点了没反应」）
+    // 点导出 → 按钮忙碌禁用 → 完成后恢复可用且真实产出下载 blob。
+    async function s35_exportButtonFeedback() {
+      var w = W();
+      w.App.select(null); // 回标识牌设置面板（导出按钮所在处）
+      var btn = $$('#right-panel-body button').filter(function (b) {
+        return b.textContent.indexOf('导出 SVG') !== -1;
+      })[0];
+      ok('S35 设置面板有导出 SVG 按钮', !!btn);
+      if (!btn) return;
+      var captured = null;
+      var origDl = w.SignStorage.download;
+      w.SignStorage.download = function (blob, name) {
+        captured = { type: blob.type, name: name };
+      };
+      btn.click();
+      ok('S35 点击后按钮立即进入忙碌态',
+        btn.disabled && btn.textContent.indexOf('⏳') !== -1,
+        'disabled=' + btn.disabled + ' text=' + btn.textContent);
+      await waitFor(function () { return !btn.disabled; }, 3000); // fonts-data.js 已被启动预载，等导出链走完
+      w.SignStorage.download = origDl;
+      ok('S35 导出完成后按钮恢复可用', !btn.disabled && btn.textContent === '⬇ 导出 SVG',
+        'disabled=' + btn.disabled + ' text=' + btn.textContent);
+      ok('S35 导出真实产出 SVG blob',
+        !!captured && captured.type.indexOf('image/svg') !== -1 && captured.name.indexOf('.svg') !== -1,
+        JSON.stringify(captured));
+    }
+
     // ─── 主流程 ───────────────────────────────────────────
 
     var frameEl = document.getElementById('app-frame');
@@ -1162,6 +1190,7 @@
         s32_autoAdjacentPadding();
         s33_dropIndicatorAlignment();
         s34_hexInputNoClobber();
+        await s35_exportButtonFeedback();
       }).then(function () {
         var passed = results.filter(function (r) { return r.pass; }).length;
         var total = results.length;

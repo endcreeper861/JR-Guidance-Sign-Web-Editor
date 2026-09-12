@@ -6,7 +6,8 @@
 (function (global) {
   'use strict';
 
-  var FONT_TIMEOUT_MS = 5000;
+  var FONT_TIMEOUT_MS = 30000;   // 字体面加载的兑底放行时限
+  var FONT_SLOW_HINT_MS = 8000;  // 超过此时长更新提示文案
 
   function showLoading(text) {
     var el = document.getElementById('loading-overlay');
@@ -18,13 +19,23 @@
     document.getElementById('loading-overlay').hidden = true;
   }
 
-  /** 预加载全部字体面（超时则带系统回退继续） */
+  /**
+   * 预加载全部字体面（度量依赖，未就绪不进界面）。
+   * 超过 FONT_TIMEOUT_MS 仍不齐则带系统回退放行（resolve(false)），
+   * 单面失败不算超时（catch 后继续等其余面）。
+   */
   function loadFonts() {
-    var specs = SignCore.FONT_LOAD_SPECS.map(function (s) {
+    var all = Promise.all(SignCore.FONT_LOAD_SPECS.map(function (s) {
       return document.fonts.load(s.css).catch(function () { /* 单面失败继续 */ });
+    })).then(function () { return true; });
+    var timeout = new Promise(function (resolve) { setTimeout(function () { resolve(false); }, FONT_TIMEOUT_MS); });
+    var slowHint = setTimeout(function () {
+      showLoading('字体加载较慢，仍在等待…（可检查网络后刷新）');
+    }, FONT_SLOW_HINT_MS);
+    return Promise.race([all, timeout]).then(function (ready) {
+      clearTimeout(slowHint);
+      return ready;
     });
-    var timeout = new Promise(function (resolve) { setTimeout(resolve, FONT_TIMEOUT_MS); });
-    return Promise.race([Promise.all(specs), timeout]);
   }
 
   function wireStaticButtons() {
@@ -94,8 +105,11 @@
         showBlockedNotice();
         return;
       }
-      showLoading('正在加载字体…');
-      loadFonts().then(function () {
+      showLoading('正在加载字体…（首次访问约 6 MB）');
+      // 并行预载导出用内嵌字体（fonts-data.js 约 7 MB）：不阻塞进界面，
+      // 但通常在用户点导出前已就绪；失败时点导出会重试并有忙碌提示。
+      SignExporters.ensureFontData().catch(function () { /* 导出时重试 */ });
+      loadFonts().then(function (fontsReady) {
         App.measure = SignCore.createCanvasMeasurer();
         App.state = SignStorage.loadAutosave() || SignState.createSign();
         App.prefs = SignStorage.loadPrefs();
@@ -105,6 +119,9 @@
         SignPanel.buildPalette();
         App.renderAll();
         hideLoading();
+        if (!fontsReady) {
+          SignUI.toast('字体未能完全加载，文字度量可能不准，建议刷新重试', 'error');
+        }
 
         // 字体全部就绪后再刷一帧，避免度量差异
         document.fonts.ready.then(function () { App.renderAll(); });
